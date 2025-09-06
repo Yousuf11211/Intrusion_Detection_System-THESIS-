@@ -5,7 +5,7 @@ import pandas as pd
 dataset_folders = ["Dataset_1", "Dataset_2", "Dataset_3", "Dataset_4"]
 
 #Report folder to save missing value details
-output_folder = "CSV_Scan_Reports"
+output_folder = "Missing_Value_Report"
 os.makedirs(output_folder, exist_ok=True)
 
 for folder in dataset_folders:
@@ -33,17 +33,6 @@ for folder in dataset_folders:
         missing_counts = df.isna().sum()
         missing_cols = {col: val for col, val in missing_counts.items() if val > 0}
 
-        # Label column detection
-        label_col = None
-        for col in df.columns:
-            if col.lower() == "label":
-                label_col = col
-                break
-
-        unique_labels = []
-        if label_col:
-            unique_labels = df[label_col].dropna().unique()
-
         #Save report
         report_lines = []
         report_lines.append(f"Report for {folder}/{file}")
@@ -59,12 +48,6 @@ for folder in dataset_folders:
             for col, val in missing_cols.items():
                 report_lines.append(f"{col:<25}: {val} missing")
         report_lines.append("")
-
-        if label_col:
-            report_lines.append(f"Label column: {label_col}")
-            report_lines.append(f"Unique labels (up to 10): {list(unique_labels)[:10]}")
-        else:
-            report_lines.append("WARNING: No 'Label' column found.")
 
  
         output_file = os.path.join(output_folder, f"{folder}_{os.path.splitext(file)[0]}_scan.txt")
