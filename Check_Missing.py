@@ -50,7 +50,7 @@ for folder in dataset_folders:
         report_lines.append("")
 
  
-        output_file = os.path.join(output_folder, f"{folder}_{os.path.splitext(file)[0]}_scan.txt")
+        output_file = os.path.join(output_folder, f"{folder}_{os.path.splitext(file)[0]}.txt")
         with open(output_file, "w", encoding="utf-8") as f:
             f.write("\n".join(report_lines))
 
