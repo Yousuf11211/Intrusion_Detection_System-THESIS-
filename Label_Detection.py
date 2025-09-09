@@ -64,7 +64,7 @@ for folder in Data_set:
                 report_lines.append(f"{label:<25}: {count}")
 
             report_text = "\n".join(report_lines)
-            output_file = os.path.join(output_folder, f"{folder}_{os.path.splitext(file)[0]}.txt")
+            output_file = os.path.join(Output_folder, f"{folder}_{os.path.splitext(file)[0]}.txt")
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(report_text)
 
