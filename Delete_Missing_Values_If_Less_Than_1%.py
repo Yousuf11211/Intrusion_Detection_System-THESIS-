@@ -1,34 +1,23 @@
 import os
 import pandas as pd
-from pygame.transform import threshold
 
-from Check_Missing import dataset_folders, output_folder
+# Main folder with all raw datasets
+main_folder = "Raw_Data"
 
-#dataset folders
-dataset_folders = ["Dataset_1","Dataset_2", "Dataset_3", "Dataset_4"]
-
-#output folders for cleaned csv's
+# Output folder for cleaned csv's
 output_folder = "Cleaned_Datasets"
-os.makedirs(output_folder,exist_ok=True)
+os.makedirs(output_folder, exist_ok=True)
 
-#1% to delete
+
+# 1% threshold to delete rows
 threshold = 0.01
 
-for folder in dataset_folders:
-    if not os.path.exists(folder):
-        print(f"Folder {folder} not found")
-        continue
-
-
-    #subfolder for each dataset
-    cleaned_subfolder = os.path.join(output_folder, folder)
-    os.makedirs(cleaned_subfolder, exist_ok=True)
-
-    for file in os.listdir(folder):
+for root, dirs, files in os.walk(main_folder):
+    for file in files:
         if not file.endswith(".csv"):
             continue
 
-        file_path = os.path.join(folder, file)
+        file_path = os.path.join(root, file)
         print(f"\nProcessing {file_path} ...")
 
         try:
@@ -37,7 +26,7 @@ for folder in dataset_folders:
             print(f"Error reading {file_path}: {e}")
             continue
 
-        #Tracks which colums were cleaned
+        # Tracks which columns were cleaned
         cols_dropped_rows = []
 
         for col in df.columns:
@@ -49,7 +38,11 @@ for folder in dataset_folders:
                 after = len(df)
                 cols_dropped_rows.append((col, before - after, round(missing_fraction * 100, 4)))
 
-        #Save cleaned file
+        # Save cleaned file (keep same subfolder structure under Cleaned_Datasets)
+        relative_path = os.path.relpath(root, main_folder)
+        cleaned_subfolder = os.path.join(output_folder, relative_path)
+        os.makedirs(cleaned_subfolder, exist_ok=True)
+
         output_file = os.path.join(cleaned_subfolder, file)
         df.to_csv(output_file, index=False)
 
@@ -61,5 +54,5 @@ for folder in dataset_folders:
         else:
             print("  No rows dropped (all missing >=1% or no missing).")
 
-        #free memory
+        # Free memory
         del df
