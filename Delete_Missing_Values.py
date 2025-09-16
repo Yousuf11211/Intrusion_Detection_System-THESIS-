@@ -8,10 +8,6 @@ main_folder = "Raw_Data"
 output_folder = "Cleaned_Datasets"
 os.makedirs(output_folder, exist_ok=True)
 
-
-# 1% threshold to delete rows
-threshold = 0.01
-
 for root, dirs, files in os.walk(main_folder):
     for file in files:
         if not file.endswith(".csv"):
@@ -26,17 +22,20 @@ for root, dirs, files in os.walk(main_folder):
             print(f"Error reading {file_path}: {e}")
             continue
 
-        # Tracks which columns were cleaned
-        cols_dropped_rows = []
+        # Row counts before cleaning
+        before = len(df)
 
-        for col in df.columns:
-            missing_fraction = df[col].isna().mean()  # fraction of missing values
-            if 0 < missing_fraction < threshold:
-                # Drop rows where this column is missing
-                before = len(df)
-                df = df.dropna(subset=[col])
-                after = len(df)
-                cols_dropped_rows.append((col, before - after, round(missing_fraction * 100, 4)))
+        # Drop rows with ANY missing values
+        df = df.dropna()
+
+        # Row counts after cleaning
+        after = len(df)
+        dropped = before - after
+        perc = round((dropped / before) * 100, 2) if before > 0 else 0
+
+        print(f"Rows before: {before}")
+        print(f"Rows after : {after}")
+        print(f"Dropped    : {dropped} rows ({perc}%)")
 
         # Save cleaned file (keep same subfolder structure under Cleaned_Datasets)
         relative_path = os.path.relpath(root, main_folder)
@@ -47,12 +46,6 @@ for root, dirs, files in os.walk(main_folder):
         df.to_csv(output_file, index=False)
 
         print(f"Saved cleaned file to {output_file}")
-        if cols_dropped_rows:
-            print("  Columns where rows were dropped (<1% missing):")
-            for col, dropped, perc in cols_dropped_rows:
-                print(f"    {col:<25} → Dropped {dropped} rows ({perc}%)")
-        else:
-            print("  No rows dropped (all missing >=1% or no missing).")
 
         # Free memory
         del df
