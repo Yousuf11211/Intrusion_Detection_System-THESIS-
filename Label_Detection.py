@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from collections import Counter
 
 # Parent folder containing all datasets
 parent_folder = "Cleaned_Datasets"
@@ -8,7 +9,7 @@ parent_folder = "Cleaned_Datasets"
 output_folder = "Labelled_Reports"
 os.makedirs(output_folder, exist_ok=True)
 
-# Walk through all subfolders and files under parent_folder
+# Process files
 for root, dirs, files in os.walk(parent_folder):
     for file in files:
         if not file.endswith(".csv"):
@@ -18,25 +19,33 @@ for root, dirs, files in os.walk(parent_folder):
         print(f"Processing file: {file_path}")
 
         try:
-            df = pd.read_csv(file_path, low_memory=False)
+            # Counter for label values
+            label_counts = Counter()
+            total_samples = 0
+
+            # Read file in chunks (only Label column)
+            for chunk in pd.read_csv(
+                file_path,
+                usecols=["Label"],   # only load Label column
+                chunksize=100000,    # adjust chunk size depending on RAM
+                low_memory=True
+            ):
+                # Count labels in this chunk
+                label_counts.update(chunk["Label"].dropna())
+                total_samples += len(chunk)
+
+        except ValueError as e:
+            print(f"Error: {e} in {file_path}. Maybe no 'Label' column.")
+            continue
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
             continue
 
-        # Find the label column
-        label_col = None
-        for col in df.columns:
-            if col.lower() == "label":
-                label_col = col
-                break
-
-        if label_col is None:
-            print(f"No 'label' column found in {file_path}. Skipping file.")
+        if total_samples == 0:
+            print(f"No rows found in {file_path}, skipping.")
             continue
 
-        # Count labels
-        label_counts = df[label_col].value_counts().to_dict()
-        total_samples = len(df)
+        # Count benign vs attack
         benign_count = sum(v for k, v in label_counts.items() if str(k).lower() == "benign")
         attack_count = total_samples - benign_count
 
