@@ -5,7 +5,7 @@ import pandas as pd
 main_folder = "Raw_Data"
 
 # Output folder for reports
-output_folder = "Missing_Value_Report"
+output_folder = "Column_Missing_Value_Report"
 os.makedirs(output_folder, exist_ok=True)
 
 for root, dirs, files in os.walk(main_folder):
