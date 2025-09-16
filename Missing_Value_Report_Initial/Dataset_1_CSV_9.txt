@@ -1,6 +1,0 @@
-Report for Dataset_1/CSV_9.csv
-==================================================
-Total rows: 1048575
-Total columns: 80
-
-No missing values found in any column.

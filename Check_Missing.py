@@ -1,5 +1,5 @@
 import os
-import pandas as pd
+import dask.dataframe as dd
 
 # Datasets folder to scan
 main_folder = "Raw_Data"
@@ -7,6 +7,12 @@ main_folder = "Raw_Data"
 # Report folder to save missing value details
 output_folder = "Missing_Value_Report"
 os.makedirs(output_folder, exist_ok=True)
+
+# Columns that sometimes have mixed types in CIC/BCCC datasets
+force_object_cols = {
+    "delta_start": "object",
+    "handshake_duration": "object"
+}
 
 for root, dirs, files in os.walk(main_folder):
     for file in files:
@@ -17,17 +23,25 @@ for root, dirs, files in os.walk(main_folder):
         print(f"\nScanning {file_path} ...")
 
         try:
-            df = pd.read_csv(file_path, low_memory=False)
+            # Load CSV with Dask (parallel, out-of-core)
+            df = dd.read_csv(
+                file_path,
+                assume_missing=True,   # promote ints → floats if needed
+                blocksize="64MB",      # chunk size
+                dtype=force_object_cols
+            )
+
+            # Count rows and columns
+            total_rows = len(df)          # lazy length
+            total_cols = len(df.columns)
+
+            # Missing values per column
+            missing_counts = df.isna().sum().compute()
+            missing_cols = {col: int(val) for col, val in missing_counts.items() if val > 0}
+
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
             continue
-
-        # Counts total rows and columns
-        total_rows, total_cols = df.shape
-
-        # Missing values per column
-        missing_counts = df.isna().sum()
-        missing_cols = {col: val for col, val in missing_counts.items() if val > 0}
 
         # Build report content
         report_lines = []
@@ -51,11 +65,10 @@ for root, dirs, files in os.walk(main_folder):
         os.makedirs(report_subfolder, exist_ok=True)
 
         # Save report
-        output_file = os.path.join(report_subfolder, f"{os.path.splitext(file)[0]}_report.txt")
+        output_file = os.path.join(
+            report_subfolder, f"{os.path.splitext(file)[0]}_report.txt"
+        )
         with open(output_file, "w", encoding="utf-8") as f:
             f.write("\n".join(report_lines))
 
         print(f"Saved scan report to {output_file}")
-
-        # Free memory
-        del df
