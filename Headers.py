@@ -4,11 +4,11 @@ import pandas as pd
 # Main folder with all raw datasets
 main_folder = "Raw_Data"
 
-# Output file where we’ll save all headers
+# Output file where we'll save headers
 output_file = "all_headers.csv"
 
-# Store results here
-all_headers = []
+# Store rows here
+rows = []
 
 for root, dirs, files in os.walk(main_folder):
     for file in files:
@@ -19,21 +19,28 @@ for root, dirs, files in os.walk(main_folder):
         print(f"Reading headers from {file_path} ...")
 
         try:
-            # Only read the header (first row) instead of full file
+            # Read only headers (no data)
             df = pd.read_csv(file_path, nrows=0)
             headers = list(df.columns)
 
-            # Add each header with filename
-            for col in headers:
-                all_headers.append({"filename": file, "column": col})
+            # Build one row: filename + headers
+            row = [file] + headers
+            rows.append(row)
 
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
             continue
 
-# Convert list to DataFrame
-headers_df = pd.DataFrame(all_headers)
+# Find the max number of headers across all files
+max_len = max(len(r) for r in rows)
+
+# Pad rows with empty strings so all have the same length
+rows_padded = [r + [""] * (max_len - len(r)) for r in rows]
+
+# Create DataFrame
+columns = ["filename"] + [f"title_{i}" for i in range(1, max_len)]
+headers_df = pd.DataFrame(rows_padded, columns=columns)
 
 # Save to CSV
 headers_df.to_csv(output_file, index=False)
-print(f"\nSaved all headers to {output_file}")
+print(f"\nSaved all headers (row-wise) to {output_file}")
