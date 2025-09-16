@@ -18,34 +18,33 @@ for root, dirs, files in os.walk(parent_folder):
         print(f"Processing {file_path}...")
 
         try:
-            df = pd.read_csv(file_path, low_memory=False)
+            # Load just the first row to detect the "Label" column (case-insensitive)
+            header_df = pd.read_csv(file_path, nrows=0)
+            label_col = None
+            for col in header_df.columns:
+                if col.lower() == "label":
+                    label_col = col
+                    break
+
+            if label_col is None:
+                print(f"No 'Label' column in {file_path}, skipping.")
+                continue
+
+            # Now load only the label column, in chunks (to save memory)
+            for chunk in pd.read_csv(file_path, usecols=[label_col], chunksize=100000):
+                file_counts = chunk[label_col].value_counts().to_dict()
+                for lbl, cnt in file_counts.items():
+                    overall_counts[lbl] = overall_counts.get(lbl, 0) + cnt
+
         except Exception as e:
             print(f"Error reading {file_path}: {e}")
             continue
-
-        # Find label column
-        label_col = None
-        for col in df.columns:
-            if col.lower() == "label":
-                label_col = col
-                break
-
-        if label_col is None:
-            print(f"No 'label' column in {file_path}, skipping.")
-            continue
-
-        # Count per label and add to overall
-        file_counts = df[label_col].value_counts().to_dict()
-        for lbl, cnt in file_counts.items():
-            overall_counts[lbl] = overall_counts.get(lbl, 0) + cnt
 
 # Convert to DataFrame for saving
 summary_df = pd.DataFrame(list(overall_counts.items()), columns=["Label", "Count"])
 summary_df.to_csv("Overall_Label_Distribution.csv", index=False)
 
 # --- Visualization ---
-
-# Bar chart
 plt.figure(figsize=(10, 6))
 summary_df.set_index("Label")["Count"].plot(kind="bar")
 plt.title("Overall Class Distribution (Benign vs. Attack Types)")
