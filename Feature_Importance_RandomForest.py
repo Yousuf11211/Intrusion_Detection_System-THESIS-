@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # Parent folder containing all CSVs
 parent_folder = "Raw_Data_2017"
 
-# We'll store chunks here to combine for training
+# We'll store dataframes here temporarily
 dfs = []
 
 # Read CSVs one by one
@@ -25,22 +25,21 @@ for root, dirs, files in os.walk(parent_folder):
             continue
 
         # Check if 'label' column exists
-        if 'label' not in df.columns.str.lower():
+        label_cols = [col for col in df.columns if col.lower() == 'label']
+        if not label_cols:
             print(f"No label column in {file_path}, skipping.")
             continue
 
-        # Make sure column name is 'label'
-        df.rename(columns={col: 'label' for col in df.columns if col.lower() == 'label'}, inplace=True)
-
+        # Standardize label column
+        df.rename(columns={label_cols[0]: 'label'}, inplace=True)
         dfs.append(df)
 
-# Combine all files into one DataFrame
+# Combine all CSVs
 data = pd.concat(dfs, ignore_index=True)
 print(f"Combined dataset shape: {data.shape}")
 
-# Encode target labels
-le = LabelEncoder()
-y = le.fit_transform(data['label'])
+# Separate features and target
+y = LabelEncoder().fit_transform(data['label'])
 X = data.drop(columns=['label'])
 
 # Encode categorical features if any
@@ -53,21 +52,29 @@ rf.fit(X, y)
 
 # Feature importance
 importances = rf.feature_importances_
-feature_names = X.columns
+feat_imp_df = pd.DataFrame({
+    'Feature': X.columns,
+    'Importance_pct': 100 * importances
+}).sort_values(by='Importance_pct', ascending=False)
 
-# Create a DataFrame for importance
-feat_imp_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-feat_imp_df = feat_imp_df.sort_values(by='Importance', ascending=False)
+# --- Save TXT report ---
+with open("Feature_Importance_Report.txt", "w", encoding="utf-8") as f:
+    f.write("Feature Importance Report\n")
+    f.write("="*50 + "\n")
+    for idx, row in feat_imp_df.iterrows():
+        f.write(f"{row['Feature']:<30}: {row['Importance_pct']:.4f}%\n")
+print("Feature importance report saved as Feature_Importance_Report.txt")
 
-# Save to CSV
+# --- Save CSV ---
 feat_imp_df.to_csv("Feature_Importance.csv", index=False)
 print("Feature importance saved to Feature_Importance.csv")
 
-# Plot top 20 features
-plt.figure(figsize=(12, 6))
-feat_imp_df.head(20).plot.bar(x='Feature', y='Importance', legend=False)
+# --- Plot Top 20 ---
+plt.figure(figsize=(12,6))
+feat_imp_df.head(20).plot.bar(x='Feature', y='Importance_pct', legend=False)
 plt.title("Top 20 Feature Importances")
-plt.ylabel("Importance")
+plt.ylabel("Importance (%)")
 plt.tight_layout()
 plt.savefig("Top20_Feature_Importance.png", dpi=300)
 plt.show()
+print("Top 20 features plot saved as Top20_Feature_Importance.png")
