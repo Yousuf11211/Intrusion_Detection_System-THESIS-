@@ -14,7 +14,7 @@ os.makedirs(output_folder, exist_ok=True)
 print("Loading all CSVs with Dask...")
 df = dd.read_csv(os.path.join(parent_folder, "*.csv"), dtype=str, assume_missing=True)
 
-# Step 2: Optional - get total rows (triggers computation)
+# Step 2: Optional - check total rows (triggers computation)
 total_rows = df.shape[0].compute()
 print(f"Total rows across all CSVs: {total_rows:,}")
 
@@ -22,7 +22,11 @@ print(f"Total rows across all CSVs: {total_rows:,}")
 print("Shuffling all rows globally (Dask)...")
 df_shuffled = df.sample(frac=1, random_state=42)
 
-# Step 4: Write shuffled data to multiple CSV files (partitioned)
+# Step 3b: Repartition to ~20 partitions → ~20 CSV files
+print("Repartitioning to 20 partitions for memory-efficient CSV output...")
+df_shuffled = df_shuffled.repartition(npartitions=20)
+
+# Step 4: Write shuffled data to partitioned CSVs
 shuffled_file_pattern = os.path.join(output_folder, "Merged_Shuffled_*.csv")
 print(f"Writing shuffled data to multiple CSVs: {shuffled_file_pattern}")
 df_shuffled.to_csv(shuffled_file_pattern, index=False)
