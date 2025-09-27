@@ -2,7 +2,7 @@ import os
 import pandas as pd
 
 # Folder containing CSV files
-folder_path = "Processed_Data_2017_Dask"
+folder_path = "Processed_Data_2017_Dask1" #2435692 2435692
 
 # Initialize row count
 total_rows = 0
