@@ -26,32 +26,38 @@ for filename in os.listdir(input_folder):
     # --- Phase 2: Process in chunks ---
     base_name = os.path.splitext(filename)[0]
     output_csv = os.path.join(input_folder, f"{base_name}_imputed.csv")
-    is_first_chunk = True
+    first_chunk = True
 
     for chunk in pd.read_csv(input_csv, chunksize=chunk_size, low_memory=False):
-        # Preview before processing
-        if is_first_chunk:
-            print("\n--- Before processing (first 5 rows) ---")
-            print(chunk.head())
-
         # Flag invalid handshakes
-        chunk['handshake_incomplete'] = 0
+        incomplete_mask = (chunk[cols_to_fix[0]].astype(str).str.lower() == "not a complete handshake") | \
+                          (chunk[cols_to_fix[1]].astype(str).str.lower() == "not a complete handshake")
+        chunk['handshake_incomplete'] = incomplete_mask.astype(int)
+
+        # Fill invalid strings with median
         for col in cols_to_fix:
-            invalid_mask = chunk[col].astype(str).str.lower() == "not a complete handshake"
-            chunk['handshake_incomplete'] = chunk['handshake_incomplete'] | invalid_mask.astype(int)
-            # Fill invalid strings with median
-            chunk.loc[invalid_mask, col] = medians[col]
+            mask = chunk[col].astype(str).str.lower() == "not a complete handshake"
+            chunk.loc[mask, col] = medians[col]
 
-        # Preview after processing
-        if is_first_chunk:
-            print("\n--- After processing (first 5 rows) ---")
-            print(chunk.head())
-            is_first_chunk = False
+        # Reorder columns: place new column just after delta_start and handshake_duration
+        cols = list(chunk.columns)
+        for col in cols_to_fix:
+            cols.remove(col)
+        # Place delta_start, handshake_duration, handshake_incomplete first
+        new_order = [cols_to_fix[0], cols_to_fix[1], 'handshake_incomplete'] + cols
+        chunk = chunk[new_order]
 
-        # Save chunk to new CSV
-        if is_first_chunk:
+        # Preview first 5 affected rows before/after
+        affected_rows = chunk['handshake_incomplete'] == 1
+        if affected_rows.any() and first_chunk:
+            print("\n--- First 5 affected rows (after filling) ---")
+            print(chunk.loc[affected_rows, ['delta_start', 'handshake_duration', 'handshake_incomplete']].head())
+            first_chunk = False
+
+        # Save to CSV with headers only in the first chunk
+        if first_chunk:
             chunk.to_csv(output_csv, index=False, mode='w')
-            is_first_chunk = False
+            first_chunk = False
         else:
             chunk.to_csv(output_csv, index=False, mode='a', header=False)
 
