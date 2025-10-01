@@ -53,8 +53,8 @@ for dirpath, _, filenames in os.walk(input_folder):
                 for chunk in pd.read_csv(input_csv_path, chunksize=chunk_size, low_memory=False):
                     for col, median_val in medians.items():
                         if col in chunk.columns:
-                            chunk[col].replace([np.inf, -np.inf], np.nan, inplace=True)
-                            chunk[col].fillna(median_val, inplace=True)
+                            chunk[col] = chunk[col].replace([np.inf, -np.inf], np.nan)
+                            chunk[col] = chunk[col].fillna(median_val)
 
                     if is_first_chunk:
                         chunk.to_csv(output_csv_path, index=False, mode='w')
