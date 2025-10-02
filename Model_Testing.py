@@ -38,11 +38,13 @@ def main():
 
     # Load test data
     test_df = pd.read_csv(test_csv_path)
+    test_df.columns = test_df.columns.str.strip().str.lower()
     print(f"Test data loaded: {test_df.shape[0]} rows")
 
     # Separate features and labels
     if 'label' in test_df.columns:
         X_test = test_df.drop(columns=['label'])
+        X_test = X_test.reindex(columns=rf.feature_names_in_, fill_value=0)
         y_test_raw = test_df['label'].values
         # Convert text labels to numeric using inverse mapping
         inv_mapping = {v: k for k, v in mapping.items()}
