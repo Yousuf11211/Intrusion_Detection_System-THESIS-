@@ -16,10 +16,14 @@ os.makedirs(output_folder, exist_ok=True)
 def load_label_mapping(path):
     mapping = {}
     with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            if ":" in line and not line.startswith("="):
-                cls, num = line.strip().split(":")
-                mapping[int(num.strip())] = cls.strip()
+        lines = f.readlines()[2:]  # skip header + separator
+        for line in lines:
+            if ":" not in line:  # skip blank/invalid lines
+                continue
+            cls, num = line.strip().split(":")
+            cls, num = cls.strip(), num.strip()
+            if num.isdigit():  # only process valid numbers
+                mapping[int(num)] = cls
     return mapping
 
 def main():
