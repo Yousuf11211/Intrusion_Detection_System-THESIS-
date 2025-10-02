@@ -1,54 +1,89 @@
-import pandas as pd
+import os
 import joblib
-from sklearn.preprocessing import LabelEncoder
+import pandas as pd
+import numpy as np
+from sklearn.metrics import classification_report, confusion_matrix
 from collections import Counter
 
-# Paths
-model_path = "Trained_Model_Complete_Data/random_forest_model.pkl"
-label_mapping_path = "Trained_Model_Complete_Data/label_mapping.txt"
+# --- CONFIG ---
+model_path = "Trained_Model_Completedata/random_forest_model.pkl"
+label_mapping_path = "Trained_Model_Completedata/label_mapping.txt"
 test_csv_path = "Test_Data/test_data.csv"
+output_folder = "Test_Reports"
+os.makedirs(output_folder, exist_ok=True)
+# --------------
 
-# Load trained model
-rf = joblib.load(model_path)
-print("Random Forest model loaded.")
+def load_label_mapping(path):
+    mapping = {}
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            if ":" in line and not line.startswith("="):
+                cls, num = line.strip().split(":")
+                mapping[int(num.strip())] = cls.strip()
+    return mapping
 
-# Load test data
-test_df = pd.read_csv(test_csv_path)
-print(f"Test data loaded: {test_df.shape[0]} samples.")
+def main():
+    # Load model
+    rf = joblib.load(model_path)
+    print("Model loaded.")
 
-# Separate features and labels
-X_test = test_df.drop(columns=['label'])
-y_test = test_df['label']
+    # Load label mapping
+    mapping = load_label_mapping(label_mapping_path)
+    classes_by_index = [mapping[i] for i in sorted(mapping.keys())]
+    print("Label mapping loaded:", classes_by_index)
 
-# Encode categorical features (same as training)
-for col in X_test.select_dtypes(include='object').columns:
-    X_test[col] = LabelEncoder().fit_transform(X_test[col])
+    # Load test data
+    test_df = pd.read_csv(test_csv_path)
+    print(f"Test data loaded: {test_df.shape[0]} rows")
 
-# Predict using the loaded model
-y_pred = rf.predict(X_test)
+    # Separate features and labels
+    if 'label' in test_df.columns:
+        X_test = test_df.drop(columns=['label'])
+        y_test_raw = test_df['label'].values
+        # Convert text labels to numeric using inverse mapping
+        inv_mapping = {v: k for k, v in mapping.items()}
+        y_test = np.array([inv_mapping.get(lbl, -1) for lbl in y_test_raw])
+    else:
+        X_test = test_df.copy()
+        y_test = None
 
-# Load label mapping to decode numeric labels
-mapping = {}
-with open(label_mapping_path, "r", encoding="utf-8") as f:
-    lines = f.readlines()[2:]  # skip header
-    for line in lines:
-        if ":" in line:
-            cls, num = line.strip().split(":")
-            mapping[int(num.strip())] = cls.strip()
+    # Predict
+    y_pred = rf.predict(X_test)
+    y_pred_labels = [mapping[num] for num in y_pred]
 
-# Convert predictions back to attack names
-y_pred_labels = [mapping[num] for num in y_pred]
+    # Prediction counts
+    attack_counts = Counter(y_pred_labels)
+    print("\nPredicted attack counts:")
+    for attack, count in attack_counts.items():
+        print(f"{attack:<20}: {count}")
 
-# Count how many times each attack was predicted
-attack_counts = Counter(y_pred_labels)
-print("Predicted attack counts:")
-for attack, count in attack_counts.items():
-    print(f"{attack:<20}: {count}")
+    # Reports
+    base_name = os.path.splitext(os.path.basename(test_csv_path))[0]
 
-# # Optional: Add predictions to the test DataFrame
-# test_df['predicted_label'] = y_pred_labels
-#
-# # Save predictions
-# pred_csv_path = "Test_Data/test_data_with_predictions.csv"
-# test_df.to_csv(pred_csv_path, index=False)
-# print(f"Predictions saved to {pred_csv_path}")
+    # If ground-truth labels available
+    if y_test is not None and (y_test >= 0).all():
+        report = classification_report(y_test, y_pred, target_names=classes_by_index, zero_division=0)
+        cm = confusion_matrix(y_test, y_pred)
+        cm_df = pd.DataFrame(cm, index=classes_by_index, columns=classes_by_index)
+
+        # Save report
+        report_path = os.path.join(output_folder, f"{base_name}_report.txt")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(report)
+        print(f"Classification report saved -> {report_path}")
+
+        # Save confusion matrix
+        cm_path = os.path.join(output_folder, f"{base_name}_confusion_matrix.csv")
+        cm_df.to_csv(cm_path)
+        print(f"Confusion matrix saved -> {cm_path}")
+    else:
+        print("[info] No ground-truth labels in test file, skipping report.")
+
+    # Save predictions
+    preds_path = os.path.join(output_folder, f"{base_name}_predictions.csv")
+    test_df['predicted_label'] = y_pred_labels
+    test_df.to_csv(preds_path, index=False)
+    print(f"Predictions saved -> {preds_path}")
+
+if __name__ == "__main__":
+    main()
