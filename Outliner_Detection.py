@@ -8,12 +8,13 @@ try:
 except ImportError:
     HAS_PLOT = False
 
+
 # ======================
 # Configuration
 # ======================
-FOLDER = "Training_2018"            # Folder containing the CSV file
+FOLDER = "Training_2018"             # Folder containing the CSV file
 FILENAME = "training_2_validated.csv"  # File name
-FEATURE = "src_port"                # Feature (column) to analyze for outliers
+OUT_FOLDER = os.path.join(FOLDER, "outlier_plots")  # Folder to save results
 
 
 # ======================
@@ -42,81 +43,76 @@ def main():
         print(f"Error: File not found at {file_path}")
         return
 
-    # Load the dataset
+    # Load dataset
     df = pd.read_csv(file_path)
     print(f"Loaded {len(df)} rows from '{FILENAME}'")
 
-    # Make sure the feature exists
-    if FEATURE not in df.columns:
-        print(f"Error: Feature '{FEATURE}' not found in the dataset columns.")
-        print("Available columns are:")
-        print(df.columns.tolist())
+    # Create output folder if it doesn't exist
+    os.makedirs(OUT_FOLDER, exist_ok=True)
+
+    # Select only numeric columns
+    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    if not numeric_cols:
+        print("No numeric columns found for outlier detection.")
         return
 
-    # Convert the feature to numeric (in case it contains strings)
-    df[FEATURE] = pd.to_numeric(df[FEATURE], errors="coerce")
+    print(f"\nFound {len(numeric_cols)} numeric columns to analyze.")
 
-    # Drop rows where the feature is missing
-    df = df.dropna(subset=[FEATURE])
+    # Process each numeric column
+    for col in numeric_cols:
+        print(f"\nProcessing column: {col}")
 
-    # --- Find outliers ---
-    outlier_mask, lower, upper = find_iqr_outliers(df, FEATURE)
-    print(f"\nIQR thresholds for '{FEATURE}':")
-    print(f"   Lower bound: {lower:.2f}")
-    print(f"   Upper bound: {upper:.2f}")
+        # Drop rows with missing values for this column
+        df_col = df.dropna(subset=[col]).copy()
 
-    n_outliers = outlier_mask.sum()
-    print(f"Found {n_outliers} outliers in '{FEATURE}'.")
+        if df_col[col].nunique() <= 1:
+            print(f"  Skipping column '{col}' (not enough unique values).")
+            continue
 
-    # --- Check label distribution among outliers ---
-    if 'label' in df.columns and n_outliers > 0:
-        print("\nLabel counts among outliers:")
-        outlier_labels = df.loc[outlier_mask, 'label'].value_counts()
-        for label, count in outlier_labels.items():
-            print(f"   {label}: {count}")
-    elif 'label' not in df.columns:
-        print("\nNo 'label' column found, skipping label distribution check.")
-    else:
-        print("\nNo outliers detected.")
+        # Find outliers
+        outlier_mask, lower, upper = find_iqr_outliers(df_col, col)
+        n_outliers = outlier_mask.sum()
 
-    # --- Visualization (optional) ---
-    if HAS_PLOT:
-        print("\nGenerating plot...")
+        print(f"  IQR thresholds -> Lower: {lower:.2f}, Upper: {upper:.2f}")
+        print(f"  Found {n_outliers} outliers in '{col}'.")
 
-        plt.figure(figsize=(10, 6))
-        if df[FEATURE].nunique() > 50:
-            # Use a histogram for continuous features
-            df[FEATURE].hist(bins=50, color="steelblue", edgecolor="black")
-            plt.title(f"Histogram of '{FEATURE}'")
+        # Save CSV with outlier flag
+        if n_outliers > 0:
+            out_col = f"is_outlier_{col}"
+            df_col[out_col] = outlier_mask.astype(int)
+            out_csv = os.path.join(OUT_FOLDER, f"{col}_outliers.csv")
+            df_col[[col, out_col]].to_csv(out_csv, index=False)
+            print(f"  Saved outlier data to: {out_csv}")
         else:
-            # Use a bar chart for discrete values
-            counts = df[FEATURE].value_counts().sort_index()
-            plt.bar(counts.index, counts.values, color="steelblue")
-            plt.title(f"Bar Chart of '{FEATURE}' Value Counts")
+            print(f"  No outliers found for '{col}', skipping CSV save.")
 
-        plt.axvline(lower, color='red', linestyle='--', label='Lower IQR Bound')
-        plt.axvline(upper, color='green', linestyle='--', label='Upper IQR Bound')
-        plt.xlabel(FEATURE)
-        plt.ylabel("Count")
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-    else:
-        print("\n(Plot skipped. Install matplotlib to enable plotting: pip install matplotlib)")
+        # Generate and save plot (if matplotlib available)
+        if HAS_PLOT:
+            plt.figure(figsize=(10, 6))
+            if df_col[col].nunique() > 50:
+                df_col[col].hist(bins=50, color="steelblue", edgecolor="black")
+                plt.title(f"Histogram of '{col}'")
+            else:
+                counts = df_col[col].value_counts().sort_index()
+                plt.bar(counts.index, counts.values, color="steelblue")
+                plt.title(f"Bar Chart of '{col}' Value Counts")
 
-    # --- Ask user if they want to save the results ---
-    if n_outliers > 0:
-        choice = input(f"\nDo you want to save a new CSV with outlier flags for '{FEATURE}'? (y/n): ")
-        if choice.lower() == 'y':
-            out_col = f"is_outlier_{FEATURE}"
-            df[out_col] = outlier_mask.astype(int)
-            new_file = os.path.join(FOLDER, FILENAME.replace('.csv', f'_outlier_{FEATURE}.csv'))
-            df.to_csv(new_file, index=False)
-            print(f"New file saved as: {os.path.basename(new_file)}")
+            plt.axvline(lower, color='red', linestyle='--', label='Lower IQR Bound')
+            plt.axvline(upper, color='green', linestyle='--', label='Upper IQR Bound')
+            plt.xlabel(col)
+            plt.ylabel("Count")
+            plt.legend()
+            plt.tight_layout()
+
+            out_plot = os.path.join(OUT_FOLDER, f"{col}_plot.png")
+            plt.savefig(out_plot)
+            plt.close()
+            print(f"  Saved plot to: {out_plot}")
         else:
-            print("No file saved.")
-    else:
-        print("\nNo outliers to tag. Nothing saved.")
+            print("  Plot skipped (matplotlib not installed).")
+
+    print("\nAll columns processed. Outlier reports and plots are saved in the folder:")
+    print(OUT_FOLDER)
 
 
 # ======================
