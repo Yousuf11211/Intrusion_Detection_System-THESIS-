@@ -1,17 +1,26 @@
 import pandas as pd
 import os
 
+# Try to import matplotlib for optional plotting
 try:
     import matplotlib.pyplot as plt
     HAS_PLOT = True
 except ImportError:
     HAS_PLOT = False
 
-FOLDER = "Training_2018"
-FILENAME = "training_2_validated.csv"
-FEATURE = "src_port"  # Change to your feature of interest
+# ======================
+# Configuration
+# ======================
+FOLDER = "Training_2018"            # Folder containing the CSV file
+FILENAME = "training_2_validated.csv"  # File name
+FEATURE = "src_port"                # Feature (column) to analyze for outliers
 
+
+# ======================
+# Helper function
+# ======================
 def find_iqr_outliers(df, column):
+    """Find outliers in a numeric column using the IQR (Interquartile Range) method."""
     q1 = df[column].quantile(0.25)
     q3 = df[column].quantile(0.75)
     iqr = q3 - q1
@@ -20,61 +29,98 @@ def find_iqr_outliers(df, column):
     mask = (df[column] < lower) | (df[column] > upper)
     return mask, lower, upper
 
-def main():
-    file_path = os.path.join(FOLDER, FILENAME)
-    df = pd.read_csv(file_path)
-    print(f"Loaded {len(df)} rows from {FILENAME}")
 
-    if FEATURE not in df.columns:
-        print(f"Feature '{FEATURE}' not in columns!")
+# ======================
+# Main function
+# ======================
+def main():
+    # Build full file path
+    file_path = os.path.join(FOLDER, FILENAME)
+
+    # Check if file exists
+    if not os.path.exists(file_path):
+        print(f"Error: File not found at {file_path}")
         return
+
+    # Load the dataset
+    df = pd.read_csv(file_path)
+    print(f"Loaded {len(df)} rows from '{FILENAME}'")
+
+    # Make sure the feature exists
+    if FEATURE not in df.columns:
+        print(f"Error: Feature '{FEATURE}' not found in the dataset columns.")
+        print("Available columns are:")
+        print(df.columns.tolist())
+        return
+
+    # Convert the feature to numeric (in case it contains strings)
     df[FEATURE] = pd.to_numeric(df[FEATURE], errors="coerce")
 
-    # 1. Find outliers
+    # Drop rows where the feature is missing
+    df = df.dropna(subset=[FEATURE])
+
+    # --- Find outliers ---
     outlier_mask, lower, upper = find_iqr_outliers(df, FEATURE)
-    print(f"IQR outlier thresholds for {FEATURE}:")
-    print(f"  Lower: {lower:.2f}, Upper: {upper:.2f}")
+    print(f"\nIQR thresholds for '{FEATURE}':")
+    print(f"   Lower bound: {lower:.2f}")
+    print(f"   Upper bound: {upper:.2f}")
+
     n_outliers = outlier_mask.sum()
     print(f"Found {n_outliers} outliers in '{FEATURE}'.")
 
-    # 2. Check label distribution of outliers
-    if n_outliers > 0:
+    # --- Check label distribution among outliers ---
+    if 'label' in df.columns and n_outliers > 0:
         print("\nLabel counts among outliers:")
         outlier_labels = df.loc[outlier_mask, 'label'].value_counts()
         for label, count in outlier_labels.items():
-            print(f"  {label}: {count}")
+            print(f"   {label}: {count}")
+    elif 'label' not in df.columns:
+        print("\nNo 'label' column found, skipping label distribution check.")
     else:
-        print("No outliers detected. Skipping outlier tag/save prompt.")
+        print("\nNo outliers detected.")
 
-    # 3. Bar plot of feature counts (all values, labeled)
+    # --- Visualization (optional) ---
     if HAS_PLOT:
-        print("\nGenerating bar plot:")
-        counts = df[FEATURE].value_counts().sort_index()
-        plt.figure(figsize=(20, 6))
+        print("\nGenerating plot...")
 
-        plt.bar(counts.index, counts.values, width=1.0, color="steelblue")
+        plt.figure(figsize=(10, 6))
+        if df[FEATURE].nunique() > 50:
+            # Use a histogram for continuous features
+            df[FEATURE].hist(bins=50, color="steelblue", edgecolor="black")
+            plt.title(f"Histogram of '{FEATURE}'")
+        else:
+            # Use a bar chart for discrete values
+            counts = df[FEATURE].value_counts().sort_index()
+            plt.bar(counts.index, counts.values, color="steelblue")
+            plt.title(f"Bar Chart of '{FEATURE}' Value Counts")
+
+        plt.axvline(lower, color='red', linestyle='--', label='Lower IQR Bound')
+        plt.axvline(upper, color='green', linestyle='--', label='Upper IQR Bound')
         plt.xlabel(FEATURE)
         plt.ylabel("Count")
-        plt.title(f"Bar Plot of '{FEATURE}' Value Frequencies")
-        plt.axvline(lower, color='red', linestyle='--', label='IQR Lower Bound')
-        plt.axvline(upper, color='green', linestyle='--', label='IQR Upper Bound')
         plt.legend()
         plt.tight_layout()
         plt.show()
     else:
-        print("\n(Bar plot skipped. To enable, run: pip install matplotlib)")
+        print("\n(Plot skipped. Install matplotlib to enable plotting: pip install matplotlib)")
 
-    # 4. Ask to tag outliers only if any exist
+    # --- Ask user if they want to save the results ---
     if n_outliers > 0:
-        choice = input(f"\nDo you want to add an 'is_outlier_{FEATURE}' column and save new CSV? (y/n): ")
+        choice = input(f"\nDo you want to save a new CSV with outlier flags for '{FEATURE}'? (y/n): ")
         if choice.lower() == 'y':
             out_col = f"is_outlier_{FEATURE}"
             df[out_col] = outlier_mask.astype(int)
             new_file = os.path.join(FOLDER, FILENAME.replace('.csv', f'_outlier_{FEATURE}.csv'))
             df.to_csv(new_file, index=False)
-            print(f"New file with outlier tagging saved as: {os.path.basename(new_file)}")
+            print(f"New file saved as: {os.path.basename(new_file)}")
         else:
-            print("No changes were made or saved.")
+            print("No file saved.")
+    else:
+        print("\nNo outliers to tag. Nothing saved.")
 
+
+# ======================
+# Run the script
+# ======================
 if __name__ == "__main__":
     main()
