@@ -28,21 +28,34 @@ for root, dirs, files in os.walk(parent_folder):
             col_counters = defaultdict(Counter)
             total_counts = Counter()
 
-            # Track label distribution (assuming column is named "Label" or "label")
+            # Track label distribution
             label_counter = Counter()
+
+            # Track per-column value vs label distribution
+            col_value_label_counter = defaultdict(lambda: defaultdict(Counter))
 
             try:
                 for chunk in pd.read_csv(file_path, chunksize=chunk_size, dtype=str, low_memory=False):
+                    labels = None
+                    if "Label" in chunk.columns:
+                        labels = chunk["Label"]
+                    elif "label" in chunk.columns:
+                        labels = chunk["label"]
+
                     for col in chunk.columns:
                         values = chunk[col].dropna()
                         col_counters[col].update(values)
                         total_counts[col] += len(values)
 
-                    # Track labels
-                    if "Label" in chunk.columns:
-                        label_counter.update(chunk["Label"].dropna())
-                    elif "label" in chunk.columns:
-                        label_counter.update(chunk["label"].dropna())
+                        # Track per-value per-label counts
+                        if labels is not None and col != "Label" and col != "label":
+                            for v, lbl in zip(chunk[col], labels):
+                                if pd.notna(v) and pd.notna(lbl):
+                                    col_value_label_counter[col][v][lbl] += 1
+
+                    # Track global labels
+                    if labels is not None:
+                        label_counter.update(labels.dropna())
 
                 # Prepare report
                 bucketed = {label: [] for _, _, label in ranges}
@@ -55,7 +68,7 @@ for root, dirs, files in os.walk(parent_folder):
 
                     for low, high, label in ranges:
                         if low <= ratio < high:
-                            bucketed[label].append((col, most_common_val, ratio, total_counts[col]))
+                            bucketed[label].append((col, counts, total_counts[col]))
                             break
 
                 # Save report
@@ -67,22 +80,35 @@ for root, dirs, files in os.walk(parent_folder):
                     # Label distribution
                     if label_counter:
                         total_labels = sum(label_counter.values())
-                        f.write("Label Distribution:\n")
+                        f.write("Global Label Distribution:\n")
                         f.write("-" * 40 + "\n")
                         for lbl, count in label_counter.most_common():
                             perc = (count / total_labels) * 100
                             f.write(f"  {lbl}: {count:,} ({perc:.2f}%)\n")
                         f.write("\n")
 
-                    # Column dominance report
+                    # Column dominance + per-value breakdown
                     for label in bucketed:
                         f.write(f"\nColumns in {label} range:\n")
                         f.write("-" * 40 + "\n")
                         if not bucketed[label]:
                             f.write("  None\n")
                         else:
-                            for col, val, ratio, total in bucketed[label]:
-                                f.write(f"  {col}: '{val}' = {ratio*100:.2f}% (out of {total:,} rows)\n")
+                            for col, counts, total in bucketed[label]:
+                                f.write(f"\nColumn: {col}\n")
+                                for val, count in counts.most_common():
+                                    ratio = count / total
+                                    f.write(f"  Value '{val}': {count:,} ({ratio*100:.2f}%)")
+
+                                    # Add label breakdown if available
+                                    if col in col_value_label_counter and val in col_value_label_counter[col]:
+                                        lbl_counts = col_value_label_counter[col][val]
+                                        breakdown = ", ".join(
+                                            f"{lbl}: {lbl_count:,}"
+                                            for lbl, lbl_count in lbl_counts.most_common()
+                                        )
+                                        f.write(f" -> {breakdown}")
+                                    f.write("\n")
 
                 print(f"Report saved to {report_path}")
 
