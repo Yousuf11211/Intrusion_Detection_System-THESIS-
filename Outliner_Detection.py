@@ -1,21 +1,17 @@
 import pandas as pd
 import os
 
-# Optional: Only needed for plots
 try:
     import matplotlib.pyplot as plt
-
     HAS_PLOT = True
 except ImportError:
     HAS_PLOT = False
 
 FOLDER = "Training_2018"
-FILENAME = "training_2_validated.csv"  # your cleaned data
-FEATURE = "your_feature_column"  # change this to your feature of interest (e.g., 'packets_count')
-
+FILENAME = "training_2_validated.csv"
+FEATURE = "src_port"  # For example, 'src_port'
 
 def find_iqr_outliers(df, column):
-    """Return boolean mask for IQR outliers in the given column"""
     q1 = df[column].quantile(0.25)
     q3 = df[column].quantile(0.75)
     iqr = q3 - q1
@@ -24,13 +20,11 @@ def find_iqr_outliers(df, column):
     mask = (df[column] < lower) | (df[column] > upper)
     return mask, lower, upper
 
-
 def main():
     file_path = os.path.join(FOLDER, FILENAME)
     df = pd.read_csv(file_path)
     print(f"Loaded {len(df)} rows from {FILENAME}")
 
-    # Make sure feature exists and is numeric
     if FEATURE not in df.columns:
         print(f"Feature '{FEATURE}' not in columns!")
         return
@@ -49,21 +43,26 @@ def main():
     for label, count in outlier_labels.items():
         print(f"  {label}: {count}")
 
-    # 3. Visualize per label (if matplotlib available)
+    # 3. Bar plot of feature counts (all values, labeled)
     if HAS_PLOT:
-        print("\nGenerating histogram by label...")
-        plt.figure(figsize=(8, 4))
-        for the_label in df['label'].unique():
-            subset = df[df['label'] == the_label]
-            subset[FEATURE].plot.hist(alpha=0.3, label=f"{the_label}", bins=30)
+        print("\nGenerating bar plot:")
+        counts = df[FEATURE].value_counts().sort_index()
+        plt.figure(figsize=(20, 6))
+
+        plt.bar(counts.index, counts.values, width=1.0, color="steelblue")
         plt.xlabel(FEATURE)
         plt.ylabel("Count")
-        plt.title(f"Histogram of '{FEATURE}' by label")
+        plt.title(f"Bar Plot of '{FEATURE}' Value Frequencies")
+
+        # Optionally add lower/upper bounds as vertical lines for IQR
+        plt.axvline(lower, color='red', linestyle='--', label='IQR Lower Bound')
+        plt.axvline(upper, color='green', linestyle='--', label='IQR Upper Bound')
+
         plt.legend()
         plt.tight_layout()
         plt.show()
     else:
-        print("\n(Histogram skipped. To enable, run: pip install matplotlib)")
+        print("\n(Bar plot skipped. To enable, run: pip install matplotlib)")
 
     # 4. Ask to tag outliers
     choice = input(f"\nDo you want to add an 'is_outlier_{FEATURE}' column and save new CSV? (y/n): ")
@@ -75,7 +74,6 @@ def main():
         print(f"New file with outlier tagging saved as: {os.path.basename(new_file)}")
     else:
         print("No changes were made or saved.")
-
 
 if __name__ == "__main__":
     main()
