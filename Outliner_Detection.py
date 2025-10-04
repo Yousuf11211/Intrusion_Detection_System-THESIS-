@@ -9,7 +9,7 @@ except ImportError:
 
 FOLDER = "Training_2018"
 FILENAME = "training_2_validated.csv"
-FEATURE = "src_port"  # For example, 'src_port'
+FEATURE = "src_port"  # Change to your feature of interest
 
 def find_iqr_outliers(df, column):
     q1 = df[column].quantile(0.25)
@@ -38,10 +38,13 @@ def main():
     print(f"Found {n_outliers} outliers in '{FEATURE}'.")
 
     # 2. Check label distribution of outliers
-    print("\nLabel counts among outliers:")
-    outlier_labels = df.loc[outlier_mask, 'label'].value_counts()
-    for label, count in outlier_labels.items():
-        print(f"  {label}: {count}")
+    if n_outliers > 0:
+        print("\nLabel counts among outliers:")
+        outlier_labels = df.loc[outlier_mask, 'label'].value_counts()
+        for label, count in outlier_labels.items():
+            print(f"  {label}: {count}")
+    else:
+        print("No outliers detected. Skipping outlier tag/save prompt.")
 
     # 3. Bar plot of feature counts (all values, labeled)
     if HAS_PLOT:
@@ -53,27 +56,25 @@ def main():
         plt.xlabel(FEATURE)
         plt.ylabel("Count")
         plt.title(f"Bar Plot of '{FEATURE}' Value Frequencies")
-
-        # Optionally add lower/upper bounds as vertical lines for IQR
         plt.axvline(lower, color='red', linestyle='--', label='IQR Lower Bound')
         plt.axvline(upper, color='green', linestyle='--', label='IQR Upper Bound')
-
         plt.legend()
         plt.tight_layout()
         plt.show()
     else:
         print("\n(Bar plot skipped. To enable, run: pip install matplotlib)")
 
-    # 4. Ask to tag outliers
-    choice = input(f"\nDo you want to add an 'is_outlier_{FEATURE}' column and save new CSV? (y/n): ")
-    if choice.lower() == 'y':
-        out_col = f"is_outlier_{FEATURE}"
-        df[out_col] = outlier_mask.astype(int)
-        new_file = os.path.join(FOLDER, FILENAME.replace('.csv', f'_outlier_{FEATURE}.csv'))
-        df.to_csv(new_file, index=False)
-        print(f"New file with outlier tagging saved as: {os.path.basename(new_file)}")
-    else:
-        print("No changes were made or saved.")
+    # 4. Ask to tag outliers only if any exist
+    if n_outliers > 0:
+        choice = input(f"\nDo you want to add an 'is_outlier_{FEATURE}' column and save new CSV? (y/n): ")
+        if choice.lower() == 'y':
+            out_col = f"is_outlier_{FEATURE}"
+            df[out_col] = outlier_mask.astype(int)
+            new_file = os.path.join(FOLDER, FILENAME.replace('.csv', f'_outlier_{FEATURE}.csv'))
+            df.to_csv(new_file, index=False)
+            print(f"New file with outlier tagging saved as: {os.path.basename(new_file)}")
+        else:
+            print("No changes were made or saved.")
 
 if __name__ == "__main__":
     main()
