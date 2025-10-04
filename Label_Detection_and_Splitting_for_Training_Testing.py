@@ -6,14 +6,14 @@ from math import floor
 # =========================
 # Global configuration
 # =========================
-PARENT_FOLDER = "Cleaned_Datasets"         # where source CSVs live
+PARENT_FOLDER = "Downscale_Csv_2018"         # where source CSVs live
 REPORTS_FOLDER = "Labelled_Reports"        # summary reports
 TRAIN_FOLDER = "Training_2018"             # output train folder
 TEST_FOLDER = "Test_2018"                  # output test folder
 TRAIN_CSV_NAME = "training_2.csv"          # output train file name
 TEST_CSV_NAME = "test_2.csv"               # output test file name
-CHUNK_SIZE = 100_000                       # rows per read_csv chunk
-LABEL_COLUMN = "Label"                     # label column name
+CHUNK_SIZE = 1_500_000                       # rows per read_csv chunk
+LABEL_COLUMN = "label"                     # label column name
 OUTPUT_ENCODING = "utf-8"                  # output text encoding
 SAVE_INTERMEDIATE_REPORTS = True           # set False to skip text reports
 
@@ -34,16 +34,18 @@ def count_labels_first(file_path):
     """
     label_counts = Counter()
     total = 0
-    for chunk in pd.read_csv(
-        file_path,
-        usecols=[LABEL_COLUMN],
-        chunksize=CHUNK_SIZE,
-        low_memory=True
-    ):
-        s = chunk[LABEL_COLUMN].dropna()
+    for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=True):
+        # Find label column case-insensitively
+        label_col = next((c for c in chunk.columns if c.lower() == LABEL_COLUMN.lower()), None)
+        if not label_col:
+            print(f"No '{LABEL_COLUMN}' column found in {file_path}. Skipping.")
+            return Counter(), 0
+
+        s = chunk[label_col].dropna()
         label_counts.update(s)
         total += len(chunk)
     return label_counts, total
+
 
 def plan_stratified_split(counts, train_ratio=0.6):
     """
@@ -127,11 +129,13 @@ def split_and_write(file_path):
     train_path = os.path.join(TRAIN_FOLDER, TRAIN_CSV_NAME)
     test_path = os.path.join(TEST_FOLDER, TEST_CSV_NAME)
 
-    # Initialize writers lazily to capture original column order and headers once
-    train_writer = None
-    test_writer = None
+    # ✅ Remove any existing old files once, before chunk loop
+    if os.path.exists(train_path):
+        os.remove(train_path)
+    if os.path.exists(test_path):
+        os.remove(test_path)
 
-    # Track how many written per label to each split
+    # Initialize counters
     written_train = defaultdict(int)
     written_test = defaultdict(int)
 
@@ -145,28 +149,16 @@ def split_and_write(file_path):
             print(f"'{LABEL_COLUMN}' column not found in {file_path}, skipping this file.")
             return
 
-        # Initialize the writers when first chunk arrives (preserve full columns)
-        if train_writer is None:
-            # Remove existing files to avoid appending to old runs
-            if os.path.exists(train_path):
-                os.remove(train_path)
-            if os.path.exists(test_path):
-                os.remove(test_path)
-
-        # We'll build rows for train and test separately for this chunk
         train_rows = []
         test_rows = []
 
-        # Iterate rows and assign based on remaining quotas
         for idx, row in chunk.iterrows():
-            label = row[LABEL_COLUMN]
-            # Safety: if unseen label appears, treat as new label with quotas 60/40 from remaining seen counts
+            label_col = next((c for c in chunk.columns if c.lower() == LABEL_COLUMN.lower()), LABEL_COLUMN)
+            label = row[label_col]
             if label not in train_needed:
-                # Set quotas on-the-fly (rare in well-formed data)
                 train_needed[label] = 0
                 test_needed[label] = 0
 
-            # Decide destination
             if written_train[label] < train_needed[label]:
                 train_rows.append(row)
                 written_train[label] += 1
@@ -174,8 +166,6 @@ def split_and_write(file_path):
                 test_rows.append(row)
                 written_test[label] += 1
             else:
-                # If both quotas for this label are filled (rounding issues), send to set with fewer total rows for that label
-                # This keeps split stable if counts slightly off due to rounding.
                 if written_train[label] < written_test[label]:
                     train_rows.append(row)
                     written_train[label] += 1
@@ -183,7 +173,6 @@ def split_and_write(file_path):
                     test_rows.append(row)
                     written_test[label] += 1
 
-        # Convert to DataFrames
         if train_rows:
             train_df = pd.DataFrame(train_rows)
             header = not os.path.exists(train_path)
@@ -192,6 +181,7 @@ def split_and_write(file_path):
             test_df = pd.DataFrame(test_rows)
             header = not os.path.exists(test_path)
             test_df.to_csv(test_path, mode="a", index=False, header=header)
+
 
     # Final counts for reporting
     final_train_counts = dict(written_train)
