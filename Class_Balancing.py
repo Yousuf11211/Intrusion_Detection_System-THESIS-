@@ -6,136 +6,290 @@ from sklearn.preprocessing import LabelEncoder
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.over_sampling import SMOTE
 
-# --- 1. Configuration ---
-# Set the main folder path. The script will search inside this folder and all its subfolders.
-input_folder = "Downscale_Csv_2018"
+# ======================
+# CONFIGURATION
+# ======================
+INPUT_FOLDER = "Training_2018"
+OUTPUT_FOLDER = "Balanced_Training_2018"
 
 
-def process_csv_file(input_csv_path):
-    """
-    This function performs the full resampling process on a single CSV file.
-    """
-    print(f"\n--- Processing file: {input_csv_path} ---")
+def get_csv_files(folder):
+    """Find all CSV files in the folder (excluding already processed ones)"""
+    csv_files = []
+    for filename in os.listdir(folder):
+        if (filename.endswith('.csv') and
+                not filename.endswith(('_balanced_train.csv', '_test.csv'))):
+            csv_files.append(os.path.join(folder, filename))
+    return csv_files
 
+
+def display_label_counts(y, le):
+    """Display label counts in a user-friendly way"""
+    counts = Counter(y)
+    rev_mapping = {i: label for i, label in enumerate(le.classes_)}
+
+    print("\nCurrent label distribution:")
+    print("-" * 40)
+
+    # Show Benign first if it exists
+    benign_key = None
+    for key, val in rev_mapping.items():
+        if val.lower() == 'benign':
+            benign_key = key
+            print(f"  Benign: {counts.get(key, 0):,}")
+            break
+
+    # Show other labels
+    for key in sorted(counts.keys()):
+        if key != benign_key:
+            label_name = rev_mapping[key]
+            print(f"  {label_name}: {counts.get(key, 0):,}")
+
+    print("-" * 40)
+    print(f"Total samples: {sum(counts.values):,}")
+
+
+def get_user_target_counts(y, le):
+    """Ask user for target counts for each label"""
+    counts = Counter(y)
+    rev_mapping = {i: label for i, label in enumerate(le.classes_)}
+    target_strategy = {}
+
+    print("\n=== SET TARGET SAMPLE COUNTS ===")
+    print("Enter the desired number of samples for each class.")
+    print("(Current count shown in parentheses)")
+
+    # Ask for Benign first
+    benign_key = None
+    for key, val in rev_mapping.items():
+        if val.lower() == 'benign':
+            benign_key = key
+            current = counts.get(key, 0)
+            while True:
+                try:
+                    target = input(f"\nBenign (current: {current:,}): ")
+                    target = int(target)
+                    if target > 0:
+                        target_strategy[key] = target
+                        break
+                    else:
+                        print("Please enter a positive number.")
+                except ValueError:
+                    print("Please enter a valid number.")
+            break
+
+    # Ask for other labels
+    for key in sorted(counts.keys()):
+        if key != benign_key:
+            label_name = rev_mapping[key]
+            current = counts.get(key, 0)
+            while True:
+                try:
+                    target = input(f"{label_name} (current: {current:,}): ")
+                    target = int(target)
+                    if target > 0:
+                        target_strategy[key] = target
+                        break
+                    else:
+                        print("Please enter a positive number.")
+                except ValueError:
+                    print("Please enter a valid number.")
+
+    return target_strategy
+
+
+def apply_resampling(X_train, y_train, target_strategy):
+    """Apply undersampling and/or oversampling to reach target counts"""
+    current_counts = Counter(y_train)
+
+    # Determine what needs undersampling and oversampling
+    undersample_strategy = {}
+    oversample_strategy = {}
+
+    for label, target in target_strategy.items():
+        current = current_counts.get(label, 0)
+        if current > target:
+            undersample_strategy[label] = target
+        elif current < target:
+            oversample_strategy[label] = target
+
+    X_resampled, y_resampled = X_train.copy(), y_train.copy()
+
+    # Apply undersampling if needed
+    if undersample_strategy:
+        print("  Applying undersampling...")
+        rus = RandomUnderSampler(sampling_strategy=undersample_strategy, random_state=42)
+        X_resampled, y_resampled = rus.fit_resample(X_resampled, y_resampled)
+
+    # Apply oversampling if needed
+    if oversample_strategy:
+        print("  Applying oversampling (SMOTE)...")
+        # Calculate safe k_neighbors
+        min_class_size = min(Counter(y_resampled).values())
+        k_neighbors = max(1, min(min_class_size - 1, 5))
+
+        smote = SMOTE(sampling_strategy=oversample_strategy, k_neighbors=k_neighbors, random_state=42)
+        X_resampled, y_resampled = smote.fit_resample(X_resampled, y_resampled)
+
+    return X_resampled, y_resampled
+
+
+def process_single_file(file_path, target_strategy, output_folder):
+    """Process a single CSV file with given target strategy"""
     try:
-        # --- 2. Load and Prepare Data ---
-        print("  Loading data...")
-        df = pd.read_csv(input_csv_path)
+        print(f"\nProcessing: {os.path.basename(file_path)}")
 
-        # Drop rows with any NaN values as a final cleaning step before splitting
+        # Load data
+        df = pd.read_csv(file_path)
         df.dropna(inplace=True)
 
         X = df.drop('label', axis=1)
         y = df['label']
 
+        # Encode labels
         le = LabelEncoder()
         y_encoded = le.fit_transform(y)
-        label_mapping = {label: i for i, label in enumerate(le.classes_)}
-        rev_label_mapping = {i: label for label, i in label_mapping.items()}
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y_encoded, test_size=0.2, random_state=42,
-                                                            stratify=y_encoded)
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+        )
 
-        original_counts = Counter(y_train)
-        print("  Original Training Set Counts:")
-        for label_int, count in sorted(original_counts.items()):
-            print(f"    {rev_label_mapping[label_int]}: {count}")
+        # Apply resampling
+        X_resampled, y_resampled = apply_resampling(X_train, y_train, target_strategy)
 
-        # --- 3. Apply Custom Resampling to the Training Data ---
-        print("  Applying custom resampling...")
-        # Step 3.1: Undersample
-        undersample_strategy = {}
-        benign_label_int = label_mapping.get('Benign')
+        # Create output folder if it doesn't exist
+        os.makedirs(output_folder, exist_ok=True)
 
-        # This block builds the undersampling strategy
-        if benign_label_int is not None:
-            for label_int, count in original_counts.items():
-                if count > 1_000_000 and label_int != benign_label_int:
-                    undersample_strategy[label_int] = 800_000
+        # Save balanced training set
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
 
-        # **BUG FIX 1**: Handle cases where no undersampling is needed
-        if undersample_strategy:
-            print("  Undersampling required. Applying RandomUnderSampler...")
-            rus = RandomUnderSampler(sampling_strategy=undersample_strategy, random_state=42)
-            X_inter, y_inter = rus.fit_resample(X_train, y_train)
-        else:
-            print("  No undersampling required. Passing data through.")
-            X_inter, y_inter = X_train, y_train
+        # Create balanced training DataFrame
+        df_train = pd.DataFrame(X_resampled, columns=X.columns)
+        df_train['label'] = le.inverse_transform(y_resampled)
 
-        # Step 3.2: Oversample
-        intermediate_counts = Counter(y_inter)
-        oversample_strategy = {label: count for label, count in intermediate_counts.items()}
-        # ... inside the oversample strategy loop ...
-        for label_int, count in intermediate_counts.items():
-            if label_int == benign_label_int: continue
-            if 200_000 <= count < 300_000:
-                oversample_strategy[label_int] = 600_000
-            elif 100_000 <= count < 200_000:
-                oversample_strategy[label_int] = 400_000
-            elif 20_000 <= count < 30_000:
-                oversample_strategy[label_int] = 200_000
-            elif 10_000 <= count < 20_000:
-                oversample_strategy[label_int] = 100_000
-            elif 300 <= count < 400:
-                oversample_strategy[label_int] = 90_000
-            elif 200 <= count < 300:
-                oversample_strategy[label_int] = 70_000
-            elif 100 <= count < 200:
-                oversample_strategy[label_int] = 50_000
-            # FIX 1: Add this rule to catch Brute_Force_XSS (count of ~92)
-            elif 50 <= count < 100:
-                oversample_strategy[label_int] = 50_000
-            elif 40 <= count < 50:
-                oversample_strategy[label_int] = 40_000
-            # FIX 2: Add this rule to catch SQL_Injection (count of ~37)
-            elif 10 <= count < 40:
-                oversample_strategy[label_int] = 40_000
-            elif 1 <= count < 10:
-                oversample_strategy[label_int] = 30_000
+        train_path = os.path.join(output_folder, f"{base_name}_balanced.csv")
+        df_train.to_csv(train_path, index=False)
 
-        min_class_size = min(intermediate_counts.values())
-        k_neighbors = max(1, min_class_size - 1)
+        # Save test set
+        df_test = pd.DataFrame(X_test, columns=X.columns)
+        df_test['label'] = le.inverse_transform(y_test)
 
-        smote = SMOTE(sampling_strategy=oversample_strategy, k_neighbors=k_neighbors, random_state=42)
-        X_resampled, y_resampled = smote.fit_resample(X_inter, y_inter)
+        test_path = os.path.join(output_folder, f"{base_name}_test.csv")
+        df_test.to_csv(test_path, index=False)
 
-        # --- 4. Combine and Save the New Datasets ---
-        print("  Saving new files...")
-        dir_name = os.path.dirname(input_csv_path)
-        base_name = os.path.splitext(os.path.basename(input_csv_path))[0]
+        print(f"  ✓ Saved: {os.path.basename(train_path)}")
+        print(f"  ✓ Saved: {os.path.basename(test_path)}")
 
-        # Create features dataframe and labels series
-        features_df = pd.DataFrame(X_resampled, columns=X.columns)
-        labels_series = pd.Series(le.inverse_transform(y_resampled), name='label', index=features_df.index)
+        # Show final counts
+        final_counts = Counter(y_resampled)
+        rev_mapping = {i: label for i, label in enumerate(le.classes_)}
+        print("  Final training set counts:")
+        for label_int, count in sorted(final_counts.items()):
+            print(f"    {rev_mapping[label_int]}: {count:,}")
 
-        # Concatenate in a single call to avoid fragmentation
-        df_balanced_train = pd.concat([features_df, labels_series], axis=1)
-
-        # Optional: ensure compact memory layout by making a shallow copy (defrag)
-        df_balanced_train = df_balanced_train.copy()
-
-        train_output_path = os.path.join(dir_name, f"{base_name}_balanced_train.csv")
-        df_balanced_train.to_csv(train_output_path, index=False)
-        print(f"    ----> Saved balanced training set to: {train_output_path}")
-
-        # Save the untouched test set (built cleanly)
-        features_test_df = pd.DataFrame(X_test, columns=X.columns)
-        labels_test_series = pd.Series(le.inverse_transform(y_test), name='label', index=features_test_df.index)
-        df_test = pd.concat([features_test_df, labels_test_series], axis=1)
-
-        test_output_path = os.path.join(dir_name, f"{base_name}_test.csv")
-        df_test.to_csv(test_output_path, index=False)
-        print(f"    ----> Saved test set to: {test_output_path}")
+        return True
 
     except Exception as e:
-        print(f"Could not process file {input_csv_path}. Error: {e}")
+        print(f"  ERROR processing {file_path}: {e}")
+        return False
 
 
-# --- Main Execution ---
+def main():
+    print("=== CSV CLASS BALANCING TOOL ===")
+    print(f"Input folder: {INPUT_FOLDER}")
+    print(f"Output folder: {OUTPUT_FOLDER}")
+
+    # Find all CSV files
+    csv_files = get_csv_files(INPUT_FOLDER)
+
+    if not csv_files:
+        print("No CSV files found in the input folder!")
+        return
+
+    print(f"\nFound {len(csv_files)} CSV file(s):")
+    for i, file_path in enumerate(csv_files, 1):
+        print(f"  {i}. {os.path.basename(file_path)}")
+
+    # Ask user which files to process
+    files_to_process = []
+    print("\n=== FILE SELECTION ===")
+    for file_path in csv_files:
+        filename = os.path.basename(file_path)
+        response = input(f"\nProcess '{filename}'? (y/n): ").lower()
+        if response == 'y':
+            files_to_process.append(file_path)
+            print(f"  ✓ Added to processing list")
+        else:
+            print(f"  ✗ Skipped")
+
+    if not files_to_process:
+        print("No files selected for processing!")
+        return
+
+    print(f"\nWill process {len(files_to_process)} file(s)")
+
+    # Process first file to get target strategy
+    first_file = files_to_process[0]
+    print(f"\n=== ANALYZING FIRST FILE: {os.path.basename(first_file)} ===")
+
+    # Load first file to show label distribution
+    try:
+        df_first = pd.read_csv(first_file)
+        df_first.dropna(inplace=True)
+        y_first = df_first['label']
+        le_first = LabelEncoder()
+        y_encoded_first = le_first.fit_transform(y_first)
+
+        display_label_counts(y_encoded_first, le_first)
+
+        # Get target counts from user
+        target_strategy = get_user_target_counts(y_encoded_first, le_first)
+
+    except Exception as e:
+        print(f"Error analyzing first file: {e}")
+        return
+
+    # Ask if user wants to use same strategy for all files
+    if len(files_to_process) > 1:
+        print(f"\n=== APPLY TO ALL FILES? ===")
+        same_strategy = input("Use the same target counts for all files? (y/n): ").lower()
+        use_same_strategy = (same_strategy == 'y')
+    else:
+        use_same_strategy = True
+
+    # Process all files
+    print(f"\n=== PROCESSING FILES ===")
+    successful = 0
+
+    for i, file_path in enumerate(files_to_process):
+        print(f"\n[{i + 1}/{len(files_to_process)}]")
+
+        if not use_same_strategy and i > 0:
+            # Ask for new strategy for this file
+            print(f"Setting target counts for: {os.path.basename(file_path)}")
+            try:
+                df_current = pd.read_csv(file_path)
+                df_current.dropna(inplace=True)
+                y_current = df_current['label']
+                le_current = LabelEncoder()
+                y_encoded_current = le_current.fit_transform(y_current)
+
+                display_label_counts(y_encoded_current, le_current)
+                target_strategy = get_user_target_counts(y_encoded_current, le_current)
+
+            except Exception as e:
+                print(f"Error analyzing {file_path}: {e}")
+                continue
+
+        # Process the file
+        if process_single_file(file_path, target_strategy, OUTPUT_FOLDER):
+            successful += 1
+
+    print(f"\n=== SUMMARY ===")
+    print(f"Successfully processed: {successful}/{len(files_to_process)} files")
+    print(f"Output saved to: {OUTPUT_FOLDER}")
+
+
 if __name__ == "__main__":
-    for dirpath, _, filenames in os.walk(input_folder):
-        for filename in filenames:
-            if filename.endswith('.csv') and not filename.endswith(('_balanced_train.csv', '_test.csv')):
-                file_path = os.path.join(dirpath, filename)
-                process_csv_file(file_path)
-    print("\nAll files processed.")
+    main()
