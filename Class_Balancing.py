@@ -46,7 +46,7 @@ def display_label_counts(y, le):
             print(f"  {label_name}: {counts.get(key, 0):,}")
 
     print("-" * 40)
-    print(f"Total samples: {sum(counts.values):,}")
+    print(f"Total samples: {sum(counts.values()):,}")
 
 
 def get_user_target_counts(y, le):
