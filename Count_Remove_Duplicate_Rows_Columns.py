@@ -2,8 +2,23 @@ import os
 import pandas as pd
 
 # ========= CONFIG =========
-INPUT_FOLDER = "Training_2018"
+INPUT_FOLDER = "Balanced_Training_2018"
 CHUNK_SIZE = 1_500_000  # For big files
+
+# ======= ASK USER WHAT TO DO ========
+print("What do you want to check/do for each file? Answer 'y' or 'n'.")
+
+do_col_count      = input("Show column count? (y/n): ").lower() == 'y'
+do_row_count      = input("Show row count? (y/n): ").lower() == 'y'
+do_dup_colnames   = input("Check for duplicate column names? (y/n): ").lower() == 'y'
+do_dup_cols_remove= False
+do_dup_rows       = input("Check for duplicate rows? (y/n): ").lower() == 'y'
+do_dup_rows_remove= False
+do_missing        = input("Check for missing values? (y/n): ").lower() == 'y'
+
+# If you want to *automatically* ask about removals only if relevant:
+ask_remove_dup_cols = do_dup_colnames
+ask_remove_dup_rows = do_dup_rows
 
 # ========== MAIN SCRIPT ===========
 for filename in os.listdir(INPUT_FOLDER):
@@ -21,40 +36,46 @@ for filename in os.listdir(INPUT_FOLDER):
     del dfs  # free RAM
 
     # Column count
-    choice = input("Do you want to see the column count? (y/n): ")
-    if choice.lower() == "y":
+    if do_col_count:
         print(f"Number of columns: {df.shape[1]}")
 
     # Row count
-    choice = input("Do you want to see the row count? (y/n): ")
-    if choice.lower() == "y":
+    if do_row_count:
         print(f"Number of rows: {df.shape[0]}")
 
-    # Duplicate column names
-    choice = input("Check for duplicate column names? (y/n): ")
-    if choice.lower() == "y":
-        col_counts = pd.Series(df.columns).value_counts()
-        duplicate_cols = col_counts[col_counts > 1]
-        if not duplicate_cols.empty:
-            print(f"Duplicate columns: {list(duplicate_cols.index)}")
-            remove_cols = input("Remove duplicate columns and save updated CSV? (y/n): ")
-            if remove_cols.lower() == "y":
-                cols = pd.Series(df.columns)
-                _, idx = pd.unique(cols, return_index=True)
-                unique_cols = cols[idx].tolist()
-                df = df[unique_cols]
-                out_path = os.path.join(INPUT_FOLDER, f"{os.path.splitext(filename)[0]}_nodupcol.csv")
-                df.to_csv(out_path, index=False)
-                print(f"Saved file without duplicate columns: {out_path}")
+    # Detect duplicate and auto-renamed columns (like .1, .2)
+    if do_dup_colnames:
+        base_names = [c.split('.')[0] for c in df.columns]  # remove .1, .2 suffixes
+        col_counts = pd.Series(base_names).value_counts()
+        duplicate_bases = col_counts[col_counts > 1]
+
+        if not duplicate_bases.empty:
+            print(f"Duplicate or renamed duplicate columns detected (like .1, .2): {list(duplicate_bases.index)}")
+
+            # Optionally remove the duplicates
+            if ask_remove_dup_cols:
+                remove_cols = input("Remove duplicates keeping only first occurrence? (y/n): ")
+                if remove_cols.lower() == "y":
+                    seen = set()
+                    unique_cols = []
+                    for c in df.columns:
+                        base = c.split('.')[0]
+                        if base not in seen:
+                            unique_cols.append(c)
+                            seen.add(base)
+                    df = df[unique_cols]
+                    out_path = os.path.join(INPUT_FOLDER, f"{os.path.splitext(filename)[0]}_nodupcol.csv")
+                    df.to_csv(out_path, index=False)
+                    print(f"Saved file without duplicate columns: {out_path}")
         else:
-            print("No duplicate column names.")
+            print("No duplicate or renamed duplicate column names.")
+
 
     # Duplicate rows
-    choice = input("Check for duplicate rows? (y/n): ")
-    if choice.lower() == "y":
+    if do_dup_rows:
         dup_rows = df.duplicated().sum()
         print(f"Duplicate rows: {dup_rows}")
-        if dup_rows > 0:
+        if dup_rows > 0 and ask_remove_dup_rows:
             remove_rows = input("Remove duplicate rows and save updated CSV? (y/n): ")
             if remove_rows.lower() == "y":
                 rows_before = df.shape[0]
@@ -64,8 +85,7 @@ for filename in os.listdir(INPUT_FOLDER):
                 print(f"Saved file without duplicate rows: {out_path}")
 
     # Missing values
-    choice = input("Check for missing values? (y/n): ")
-    if choice.lower() == "y":
+    if do_missing:
         missing = df.isnull().sum()
         missing_dict = {col: n for col, n in missing.items() if n > 0}
         if missing_dict:
