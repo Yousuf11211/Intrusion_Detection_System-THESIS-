@@ -129,7 +129,7 @@ def split_and_write(file_path):
     train_path = os.path.join(TRAIN_FOLDER, TRAIN_CSV_NAME)
     test_path = os.path.join(TEST_FOLDER, TEST_CSV_NAME)
 
-    # ✅ Remove any existing old files once, before chunk loop
+    #  Remove any existing old files once, before chunk loop
     if os.path.exists(train_path):
         os.remove(train_path)
     if os.path.exists(test_path):
@@ -210,7 +210,12 @@ def main():
                 continue
             file_path = os.path.join(root, file)
             print(f"Processing file: {file_path}")
-            split_and_write(file_path)
+            do_split = input("Do you want to perform train-test split on this file? (y/n): ").strip().lower()
+            if do_split == 'y':
+                split_and_write(file_path)
+            else:
+                print("Skipping train-test split for this file.\n")
+
 
 if __name__ == "__main__":
     main()
