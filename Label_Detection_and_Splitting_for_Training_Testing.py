@@ -1,22 +1,16 @@
 import os
 import pandas as pd
 from collections import Counter, defaultdict
-from math import floor
 
-# =========================
-# Global configuration
-# =========================
-PARENT_FOLDER = "Downscale_Csv_2018"         # where source CSVs live
-REPORTS_FOLDER = "Labelled_Reports"        # summary reports
-TRAIN_FOLDER = "Training_2018"             # output train folder
-TEST_FOLDER = "Test_2018"                  # output test folder
-TRAIN_CSV_NAME = "training_2.csv"          # output train file name
-TEST_CSV_NAME = "test_2.csv"               # output test file name
-CHUNK_SIZE = 1_500_000                       # rows per read_csv chunk
-LABEL_COLUMN = "label"                     # label column name
-OUTPUT_ENCODING = "utf-8"                  # output text encoding
-SAVE_INTERMEDIATE_REPORTS = True           # set False to skip text reports
-
+PARENT_FOLDER = "Downscale_Csv_2018"
+REPORTS_FOLDER = "Labelled_Reports"
+TRAIN_FOLDER = "Training_2018"
+TEST_FOLDER = "Test_2018"
+TRAIN_CSV_NAME = "training_2.csv"
+TEST_CSV_NAME = "test_2.csv"
+CHUNK_SIZE = 1_500_000
+LABEL_COLUMN = "label"
+OUTPUT_ENCODING = "utf-8"
 os.makedirs(REPORTS_FOLDER, exist_ok=True)
 os.makedirs(TRAIN_FOLDER, exist_ok=True)
 os.makedirs(TEST_FOLDER, exist_ok=True)
@@ -28,48 +22,32 @@ def safe_lower(x):
         return str(x)
 
 def count_labels_first(file_path):
-    """
-    First pass: stream through the file to count labels only.
-    Returns (label_counts: Counter, total_rows: int).
-    """
     label_counts = Counter()
     total = 0
     for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=True):
-        # Find label column case-insensitively
         label_col = next((c for c in chunk.columns if c.lower() == LABEL_COLUMN.lower()), None)
         if not label_col:
             print(f"No '{LABEL_COLUMN}' column found in {file_path}. Skipping.")
             return Counter(), 0
-
         s = chunk[label_col].dropna()
         label_counts.update(s)
         total += len(chunk)
     return label_counts, total
 
-
 def plan_stratified_split(counts, train_ratio=0.6):
-    """
-    For each label, decide how many go to train vs test, preserving ratios.
-    Returns two dicts: train_needed[label], test_needed[label].
-    """
     train_needed = {}
     test_needed = {}
     for label, cnt in counts.items():
         t = int(round(cnt * train_ratio))
-        # Ensure bounds
         t = max(0, min(cnt, t))
         train_needed[label] = t
         test_needed[label] = cnt - t
     return train_needed, test_needed
 
 def build_report(file_path, total_samples, label_counts, train_counts, test_counts):
-    """
-    Create a human-readable report as text.
-    """
     benign_key_variants = {k for k in label_counts.keys() if safe_lower(k) == "benign"}
     benign_total = sum(label_counts[k] for k in benign_key_variants) if benign_key_variants else 0
     attack_total = total_samples - benign_total
-
     lines = []
     lines.append(f"Report for {file_path}")
     lines.append("=" * 60)
@@ -102,11 +80,6 @@ def write_report_text(report_text, file_path):
     print(f"Saved report to {out_path}")
 
 def split_and_write(file_path):
-    """
-    Two-pass streaming approach:
-      1) Count labels only.
-      2) Stream rows again, writing each row to train/test according to per-label quotas.
-    """
     # Pass 1: counts
     try:
         label_counts, total_rows = count_labels_first(file_path)
@@ -121,25 +94,20 @@ def split_and_write(file_path):
         print(f"No rows found in {file_path}, skipping.")
         return
 
-    # Plan per-label quotas
     train_needed, test_needed = plan_stratified_split(label_counts, train_ratio=0.6)
 
-    # Prepare output paths
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     train_path = os.path.join(TRAIN_FOLDER, TRAIN_CSV_NAME)
     test_path = os.path.join(TEST_FOLDER, TEST_CSV_NAME)
 
-    #  Remove any existing old files once, before chunk loop
     if os.path.exists(train_path):
         os.remove(train_path)
     if os.path.exists(test_path):
         os.remove(test_path)
 
-    # Initialize counters
     written_train = defaultdict(int)
     written_test = defaultdict(int)
 
-    # Pass 2: assign rows
     for chunk in pd.read_csv(
         file_path,
         chunksize=CHUNK_SIZE,
@@ -182,26 +150,40 @@ def split_and_write(file_path):
             header = not os.path.exists(test_path)
             test_df.to_csv(test_path, mode="a", index=False, header=header)
 
-
-    # Final counts for reporting
     final_train_counts = dict(written_train)
     final_test_counts = dict(written_test)
 
     # Optional: write a report per input file
-    if SAVE_INTERMEDIATE_REPORTS:
-        report_text = build_report(
-            file_path=file_path,
-            total_samples=total_rows,
-            label_counts=label_counts,
-            train_counts=final_train_counts,
-            test_counts=final_test_counts
-        )
-        write_report_text(report_text, file_path)
+    report_text = build_report(
+        file_path=file_path,
+        total_samples=total_rows,
+        label_counts=label_counts,
+        train_counts=final_train_counts,
+        test_counts=final_test_counts
+    )
+    write_report_text(report_text, file_path)
 
-    # Print quick console summary
     print(f"Done: {file_path}")
     print("Train counts per label:", final_train_counts)
     print("Test counts per label:", final_test_counts)
+
+def label_report(file_path):
+    label_counts, total_rows = count_labels_first(file_path)
+    if total_rows == 0:
+        print(f"No rows found in {file_path}, skipping.")
+        return
+    print(f"\nLabel count for {file_path}:")
+    for label, cnt in label_counts.items():
+        print(f"  {label}: {cnt}")
+    print(f"Total samples: {total_rows}")
+    save = input("Do you want to save this label report? (y/n): ").strip().lower()
+    if save == 'y':
+        report_text = f"Label count report for {file_path}\n\nTotal samples: {total_rows}\n"
+        for label, cnt in label_counts.items():
+            report_text += f"{label}: {cnt}\n"
+        write_report_text(report_text, file_path)
+    else:
+        print("Label report not saved.")
 
 def main():
     for root, dirs, files in os.walk(PARENT_FOLDER):
@@ -209,13 +191,16 @@ def main():
             if not file.endswith(".csv"):
                 continue
             file_path = os.path.join(root, file)
-            print(f"Processing file: {file_path}")
+            print(f"\nProcessing file: {file_path}")
+            choice = input("Label test only (shows and/or saves label counts, no split)? (y/n): ").strip().lower()
+            if choice == 'y':
+                label_report(file_path)
+                continue
             do_split = input("Do you want to perform train-test split on this file? (y/n): ").strip().lower()
             if do_split == 'y':
                 split_and_write(file_path)
             else:
-                print("Skipping train-test split for this file.\n")
-
+                print("Skipping train-test split for this file.")
 
 if __name__ == "__main__":
     main()
