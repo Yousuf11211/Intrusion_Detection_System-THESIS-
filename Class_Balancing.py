@@ -72,14 +72,19 @@ def apply_resampling(X, y, target_strategy):
     X_res, y_res = X.copy(), y.copy()
 
     if undersample:
+        print("Undersampling started...")
         rus = RandomUnderSampler(sampling_strategy=undersample, random_state=42)
         X_res, y_res = rus.fit_resample(X_res, y_res)
+        print("Undersampling done. New counts:", dict(sorted(Counter(y_res).items())))
 
     if oversample:
+        print("Oversampling started...")
         min_class_size = min(Counter(y_res).values())
         k_neighbors = max(1, min(min_class_size - 1, 5))
         smote = SMOTE(sampling_strategy=oversample, k_neighbors=k_neighbors, random_state=42)
         X_res, y_res = smote.fit_resample(X_res, y_res)
+        print("Oversampling done. New counts:", dict(sorted(Counter(y_res).items())))
+
 
     return X_res, y_res
 
