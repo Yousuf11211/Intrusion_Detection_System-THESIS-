@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-import xgboost as xgb  # Import XGBoost
+import xgboost as xgb
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
@@ -14,6 +14,7 @@ os.makedirs(model_folder, exist_ok=True)
 os.makedirs(report_folder, exist_ok=True)
 
 train_full_data = True  # True = train on full data, False = 80/20 split
+
 
 # ===== FUNCTIONS =====
 def process_csv(file_path):
@@ -48,9 +49,13 @@ def process_csv(file_path):
             f.write(f"{cls:<30}: {num}\n")
     print(f"Label mapping saved to {mapping_path}")
 
-    # Encode categorical features
-    for col in X.select_dtypes(include='object').columns:
-        X[col] = LabelEncoder().fit_transform(X[col])
+    # --- Find and encode categorical features ---
+    categorical_cols = X.select_dtypes(include='object').columns
+    if not categorical_cols.empty:
+        print(f"Found {len(categorical_cols)} text-based feature column(s) to encode:")
+        for col in categorical_cols:
+            print(f"  - Encoding column: '{col}'")
+            X[col] = LabelEncoder().fit_transform(X[col])
 
     # --- TRAINING ---
     model_name = os.path.basename(file_path).replace(".csv", "")
@@ -62,7 +67,7 @@ def process_csv(file_path):
             n_estimators=100,
             n_jobs=-1,
             random_state=42,
-            use_label_encoder=False, # Suppresses a deprecation warning
+            use_label_encoder=False,  # Suppresses a deprecation warning
             eval_metric='mlogloss'
         )
         xgb_model.fit(X, y)
@@ -80,7 +85,7 @@ def process_csv(file_path):
             n_estimators=100,
             n_jobs=-1,
             random_state=42,
-            use_label_encoder=False, # Suppresses a deprecation warning
+            use_label_encoder=False,  # Suppresses a deprecation warning
             eval_metric='mlogloss'
         )
         xgb_model.fit(X_train, y_train)
