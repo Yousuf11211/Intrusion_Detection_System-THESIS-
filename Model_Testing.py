@@ -6,9 +6,9 @@ from sklearn.metrics import classification_report, confusion_matrix
 from collections import Counter
 
 # --- CONFIG ---
-model_path = "Trained_Model_Completedata/random_forest_model.pkl"
-label_mapping_path = "Trained_Model_Completedata/label_mapping.txt"
-test_csv_path = "Test_Data/test_data.csv"
+model_path = "Model_2018/full_model.pkl"
+label_mapping_path = "Model_2018/full_label_mapping.txt"
+test_csv_path = "Balanced_Test_2018/full.csv"
 output_folder = "Test_Reports"
 os.makedirs(output_folder, exist_ok=True)
 # --------------
