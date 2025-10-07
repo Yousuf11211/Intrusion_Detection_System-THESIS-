@@ -27,6 +27,11 @@ def load_label_mapping(path):
     return mapping
 
 def main():
+    # --- USER PROMPTS ---
+    save_report = input("Save classification report? (y/n): ").strip().lower() == "y"
+    save_cm = input("Save confusion matrix? (y/n): ").strip().lower() == "y"
+    save_pred_counts = input("Save predictions/counts CSV? (y/n): ").strip().lower() == "y"
+
     # Load model
     rf = joblib.load(model_path)
     print("Model loaded.")
@@ -46,7 +51,6 @@ def main():
         X_test = test_df.drop(columns=['label'])
         X_test = X_test.reindex(columns=rf.feature_names_in_, fill_value=0)
         y_test_raw = test_df['label'].values
-        # Convert text labels to numeric using inverse mapping
         inv_mapping = {v: k for k, v in mapping.items()}
         y_test = np.array([inv_mapping.get(lbl, -1) for lbl in y_test_raw])
     else:
@@ -66,30 +70,39 @@ def main():
     # Reports
     base_name = os.path.splitext(os.path.basename(test_csv_path))[0]
 
-    # If ground-truth labels available
+    # Classification Report & Confusion Matrix
     if y_test is not None and (y_test >= 0).all():
         report = classification_report(y_test, y_pred, target_names=classes_by_index, zero_division=0)
         cm = confusion_matrix(y_test, y_pred)
         cm_df = pd.DataFrame(cm, index=classes_by_index, columns=classes_by_index)
 
-        # Save report
-        report_path = os.path.join(output_folder, f"{base_name}_report.txt")
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write(report)
-        print(f"Classification report saved -> {report_path}")
+        if save_report:
+            report_path = os.path.join(output_folder, f"{base_name}_report.txt")
+            with open(report_path, "w", encoding="utf-8") as f:
+                f.write(report)
+            print(f"Classification report saved -> {report_path}")
+        else:
+            print("\nClassification Report:")
+            print(report)
 
-        # Save confusion matrix
-        cm_path = os.path.join(output_folder, f"{base_name}_confusion_matrix.csv")
-        cm_df.to_csv(cm_path)
-        print(f"Confusion matrix saved -> {cm_path}")
+        if save_cm:
+            cm_path = os.path.join(output_folder, f"{base_name}_confusion_matrix.csv")
+            cm_df.to_csv(cm_path)
+            print(f"Confusion matrix saved -> {cm_path}")
+        else:
+            print("\nConfusion Matrix:")
+            print(cm_df)
     else:
         print("[info] No ground-truth labels in test file, skipping report.")
 
-    # Save predictions
-    preds_path = os.path.join(output_folder, f"{base_name}_predictions.csv")
-    test_df['predicted_label'] = y_pred_labels
-    test_df.to_csv(preds_path, index=False)
-    print(f"Predictions saved -> {preds_path}")
+    if save_pred_counts:
+        preds_path = os.path.join(output_folder, f"{base_name}_predictions.csv")
+        test_df['predicted_label'] = y_pred_labels
+        test_df.to_csv(preds_path, index=False)
+        print(f"Predictions saved -> {preds_path}")
+    else:
+        print("\nPredictions:")
+        print(test_df[['predicted_label']].value_counts())
 
 if __name__ == "__main__":
     main()
