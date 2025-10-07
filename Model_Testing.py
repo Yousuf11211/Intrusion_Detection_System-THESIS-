@@ -14,6 +14,7 @@ os.makedirs(output_folder, exist_ok=True)
 # --------------
 
 def load_label_mapping(path):
+    """Loads the label mapping from a text file."""
     mapping = {}
     with open(path, "r", encoding="utf-8") as f:
         lines = f.readlines()[2:]  # skip header + separator
@@ -30,7 +31,8 @@ def main():
     # --- USER PROMPTS ---
     save_report = input("Save classification report? (y/n): ").strip().lower() == "y"
     save_cm = input("Save confusion matrix? (y/n): ").strip().lower() == "y"
-    save_pred_counts = input("Save predictions/counts CSV? (y/n): ").strip().lower() == "y"
+    save_preds_csv = input("Save full predictions CSV? (y/n): ").strip().lower() == "y"
+    save_counts_summary = input("Save prediction counts summary? (y/n): ").strip().lower() == "y"
 
     # Load model
     rf = joblib.load(model_path)
@@ -67,6 +69,15 @@ def main():
     for attack, count in attack_counts.items():
         print(f"{attack:<20}: {count}")
 
+    # Save prediction counts summary if requested
+    if save_counts_summary:
+        base_name = os.path.splitext(os.path.basename(test_csv_path))[0]
+        counts_path = os.path.join(output_folder, f"{base_name}_predicted_counts.txt")
+        with open(counts_path, "w", encoding="utf-8") as f:
+            for attack, count in sorted(attack_counts.items()):
+                f.write(f"{attack:<20}: {count}\n")
+        print(f"Prediction counts summary saved -> {counts_path}")
+
     # Reports
     base_name = os.path.splitext(os.path.basename(test_csv_path))[0]
 
@@ -93,16 +104,16 @@ def main():
             print("\nConfusion Matrix:")
             print(cm_df)
     else:
-        print("[info] No ground-truth labels in test file, skipping report.")
+        print("[info] No ground-truth labels in test file, skipping report generation.")
 
-    if save_pred_counts:
+    # Save full predictions to CSV
+    if save_preds_csv:
         preds_path = os.path.join(output_folder, f"{base_name}_predictions.csv")
-        test_df['predicted_label'] = y_pred_labels
-        test_df.to_csv(preds_path, index=False)
-        print(f"Predictions saved -> {preds_path}")
-    else:
-        print("\nPredictions:")
-        print(test_df[['predicted_label']].value_counts())
+        # Create a DataFrame of predictions to save
+        output_df = test_df.copy()
+        output_df['predicted_label'] = y_pred_labels
+        output_df.to_csv(preds_path, index=False)
+        print(f"Full predictions saved -> {preds_path}")
 
 if __name__ == "__main__":
     main()
