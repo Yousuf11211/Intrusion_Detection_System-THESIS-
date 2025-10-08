@@ -59,28 +59,10 @@ def main():
                 print(f"  Outlier label counts:")
                 for label, count in label_counts.items():
                     print(f"    {label}: {count}")
-
-            # Save only outlier rows
-            outliers_df = df_col[outlier_mask]
-            outliers_csv = os.path.join(OUT_FOLDER, f"{col}_only_outliers.csv")
-            outliers_df.to_csv(outliers_csv, index=False)
-            print(f"  Saved only outlier rows to: {outliers_csv}")
-
-            # Save only non-outlier rows
-            not_outliers_df = df_col[~outlier_mask]
-            not_outliers_csv = os.path.join(OUT_FOLDER, f"{col}_no_outliers.csv")
-            not_outliers_df.to_csv(not_outliers_csv, index=False)
-            print(f"  Saved rows with no outliers to: {not_outliers_csv}")
-
-            # Save outlier flags (optional)
-            out_col = f"is_outlier_{col}"
-            df_col[out_col] = outlier_mask.astype(int)
-            outflag_csv = os.path.join(OUT_FOLDER, f"{col}_outlier_flag.csv")
-            df_col[[col, out_col]].to_csv(outflag_csv, index=False)
-            print(f"  Saved outlier flag column to: {outflag_csv}")
         else:
-            print(f"  No outliers found for '{col}', skipping CSV save.")
+            print(f"  No outliers found for '{col}'.")
 
+        # Generate and save ONLY the plot (PNG)
         if HAS_PLOT:
             plt.figure(figsize=(10, 6))
             if df_col[col].nunique() > 50:
@@ -106,11 +88,9 @@ def main():
             print("  Plot skipped (matplotlib not installed).")
 
     print("\n===========================")
-    print("\nAll columns processed. Outlier reports and plots are saved in the folder:")
-    print(OUT_FOLDER)
-    print("\nSummary of columns with outliers:")
-    print(f"  Columns with outlier values: {cols_with_outliers}")
-    print(f"  Number of columns with outliers: {len(cols_with_outliers)}")
+    print(f"\nPlots saved in folder: {OUT_FOLDER}")
+    print(f"\nColumns with outlier values: {cols_with_outliers}")
+    print(f"Number of columns with outliers: {len(cols_with_outliers)}")
 
 if __name__ == "__main__":
     main()
