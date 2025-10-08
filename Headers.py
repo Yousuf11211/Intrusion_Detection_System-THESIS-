@@ -2,10 +2,10 @@ import os
 import pandas as pd
 
 # Main folder with all raw datasets
-main_folder = "Raw_Data"
+main_folder = "Cic2017T"
 
 # Output file where we'll save headers
-output_file = "all_headers.csv"
+output_file = "Cic2017/traffic/all_headers.csv"
 
 # Store rows here
 rows = []
