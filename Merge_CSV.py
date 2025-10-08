@@ -7,10 +7,10 @@ import warnings
 warnings.simplefilter(action="ignore", category=pd.errors.DtypeWarning)
 
 # Parent folder containing all CSVs
-parent_folder = "Raw_Data_2018"
+parent_folder = "MachineLearningCVE"
 
 # Output folder for merged and shuffled CSV
-output_folder = "Processed_Data_2018"
+output_folder = "Cic2017M"
 os.makedirs(output_folder, exist_ok=True)
 
 # Temporary list to store file paths
