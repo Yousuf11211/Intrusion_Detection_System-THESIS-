@@ -14,8 +14,8 @@ OUTPUT_FOLDER = "Cleaned_Separated_Data"
 # The number of rows to process at a time (adjust based on your RAM).
 CHUNK_SIZE = 500_000
 
-# The default maximum number of rows for ATTACK files before splitting.
-ATTACK_ROWS_PER_FILE = 1_000_000
+# A default value that can be suggested to the user.
+DEFAULT_ROWS_PER_FILE = 1_000_000
 
 # The name of the column that contains the labels (e.g., 'Label'). This is case-sensitive!
 LABEL_COLUMN = 'Label'
@@ -74,10 +74,10 @@ def get_user_instructions(total_counts, missing_counts):
     if BENIGN_LABEL_VALUE in total_counts:
         while True:
             try:
-                prompt = f"\nEnter the max rows per Benign file (press Enter for default: {ATTACK_ROWS_PER_FILE:,}): "
+                prompt = f"\nEnter the max rows per Benign file (press Enter for default: {DEFAULT_ROWS_PER_FILE:,}): "
                 user_input = input(prompt).strip()
                 if not user_input:
-                    benign_rows_per_file = ATTACK_ROWS_PER_FILE
+                    benign_rows_per_file = DEFAULT_ROWS_PER_FILE
                     break
                 val = int(user_input)
                 if val > 0:
@@ -88,7 +88,26 @@ def get_user_instructions(total_counts, missing_counts):
             except ValueError:
                 print("  Invalid input. Please enter a whole number.")
 
-    # Prompt 2: Get which labels to clean
+    # --- ADDED: Get the row limit for Attack files ---
+    attack_rows_per_file = 0
+    if any(label != BENIGN_LABEL_VALUE for label in total_counts):
+        while True:
+            try:
+                prompt = f"Enter the max rows per Attack file (press Enter for default: {DEFAULT_ROWS_PER_FILE:,}): "
+                user_input = input(prompt).strip()
+                if not user_input:
+                    attack_rows_per_file = DEFAULT_ROWS_PER_FILE
+                    break
+                val = int(user_input)
+                if val > 0:
+                    attack_rows_per_file = val
+                    break
+                else:
+                    print("  Please enter a positive number.")
+            except ValueError:
+                print("  Invalid input. Please enter a whole number.")
+
+    # Prompt 3: Get which labels to clean
     labels_to_delete = set()
     if not missing_counts:
         print("\nThis file has no rows with missing values. No cleaning is needed.")
@@ -107,11 +126,11 @@ def get_user_instructions(total_counts, missing_counts):
         elif user_input.lower() not in ['none', '']:
             labels_to_delete = {label.strip() for label in user_input.split(',')}
 
-    # --- NEW PROMPTS FOR ADVANCED SAVING ---
+    # Prompt 4: Get advanced saving options
     separate_by_missing_status = False
     separation_scope = 'none'
 
-    print("-" * 30)  # Visual separator
+    print("-" * 30)
     user_wants_separation = input(
         "Do you want to separate output into 'NoMissing' and 'Missing' folders? (y/n): ").strip().lower()
     if user_wants_separation in ['y', 'yes']:
@@ -130,80 +149,68 @@ def get_user_instructions(total_counts, missing_counts):
             else:
                 print("Invalid input. Please enter 'b', 'a', or 'bo'.")
 
-    return labels_to_delete, benign_rows_per_file, separate_by_missing_status, separation_scope
+    return labels_to_delete, benign_rows_per_file, attack_rows_per_file, separate_by_missing_status, separation_scope
 
 
-def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, separate_by_missing, scope):
+def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, attack_rows_per_file, separate_by_missing,
+                          scope):
     """
-    Reads the CSV again, cleans it, and saves it using either the simple
-    or the advanced (Missing/NoMissing) separation method.
+    Reads the CSV again, cleans it, and saves it using the chosen method.
     """
     if labels_to_delete:
         print(f"\nStarting cleanup for labels: {', '.join(labels_to_delete)}")
     else:
         print("\nStarting separation process (no cleaning requested).")
 
-    # --- Create top-level directories ---
     if separate_by_missing:
-        # Create the advanced folder structure
         for status in ["NoMissing", "Missing"]:
             for category in ["Benign", "Attacks"]:
                 os.makedirs(os.path.join(OUTPUT_FOLDER, status, category), exist_ok=True)
     else:
-        # Create the simple folder structure
         os.makedirs(os.path.join(OUTPUT_FOLDER, "Benign"), exist_ok=True)
         os.makedirs(os.path.join(OUTPUT_FOLDER, "Attacks"), exist_ok=True)
 
-    # --- Buffers and Counters Setup ---
-    # Buffers hold DataFrames until they are large enough to save
     buffers = defaultdict(lambda: defaultdict(list))
-    # Counters keep track of file parts (e.g., part_1, part_2)
     part_counts = defaultdict(lambda: defaultdict(lambda: 1))
 
     try:
         for chunk_num, chunk in enumerate(pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=False)):
             print(f"  Processing chunk {chunk_num + 1}...")
 
-            # 1. Clean data based on user's initial instructions
             chunk_cleaned = chunk
             if labels_to_delete:
                 rows_to_drop_mask = (chunk[LABEL_COLUMN].isin(labels_to_delete)) & (chunk.isnull().any(axis=1))
                 chunk_cleaned = chunk[~rows_to_drop_mask]
 
-            # 2. Separate into Benign and Attack categories
             benign_data = chunk_cleaned[chunk_cleaned[LABEL_COLUMN] == BENIGN_LABEL_VALUE]
             attack_data = chunk_cleaned[chunk_cleaned[LABEL_COLUMN] != BENIGN_LABEL_VALUE]
 
-            # 3. Buffer the data based on the chosen save method
-            # Process Benign Data
             if not benign_data.empty:
                 if separate_by_missing and scope in ['benign', 'both']:
                     buffers['Benign']['NoMissing'].append(benign_data.dropna())
                     buffers['Benign']['Missing'].append(benign_data[benign_data.isnull().any(axis=1)])
-                else:  # Simple save or not in scope
+                else:
                     buffers['Benign']['default'].append(benign_data)
 
-            # Process Attack Data
             if not attack_data.empty:
                 if separate_by_missing and scope in ['attacks', 'both']:
                     for label, group in attack_data.groupby(LABEL_COLUMN):
                         buffers[label]['NoMissing'].append(group.dropna())
                         buffers[label]['Missing'].append(group[group.isnull().any(axis=1)])
-                else:  # Simple save or not in scope
+                else:
                     for label, group in attack_data.groupby(LABEL_COLUMN):
                         buffers[label]['default'].append(group)
 
-            # 4. Save any buffers that are full
             for category, status_buffers in list(buffers.items()):
                 for status, buffer_list in list(status_buffers.items()):
                     is_benign = (category == BENIGN_LABEL_VALUE)
-                    row_limit = benign_rows_per_file if is_benign else ATTACK_ROWS_PER_FILE
+                    # --- MODIFIED: Use correct variable for row limit ---
+                    row_limit = benign_rows_per_file if is_benign else attack_rows_per_file
 
-                    if sum(len(df) for df in buffer_list) >= row_limit:
+                    if row_limit > 0 and sum(len(df) for df in buffer_list) >= row_limit:
                         df_to_save = pd.concat(buffer_list, ignore_index=True)
-                        if df_to_save.empty: continue  # Skip if concatenation results in empty df
+                        if df_to_save.empty: continue
 
-                        # Determine the correct output path
                         safe_name = "".join(c for c in category if c.isalnum() or c in ('-', '_'))
                         part_num = part_counts[category][status]
 
@@ -220,9 +227,7 @@ def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, sep
                         buffer_list.clear()
                         part_counts[category][status] += 1
 
-        # --- Final Save ---
         print("\n  Saving remaining data...")
-        # (This logic is identical to the chunk saving, just for the leftovers)
         for category, status_buffers in buffers.items():
             for status, buffer_list in status_buffers.items():
                 if buffer_list:
@@ -266,8 +271,12 @@ def main():
         total_counts, missing_counts = analyze_file(file_path)
         if total_counts is None: continue
 
-        labels_to_delete, benign_rows, separate_by_missing, scope = get_user_instructions(total_counts, missing_counts)
-        process_and_save_file(file_path, labels_to_delete, benign_rows, separate_by_missing, scope)
+        # --- MODIFIED: Unpack all 5 instruction variables ---
+        labels_to_delete, benign_rows, attack_rows, separate_by_missing, scope = get_user_instructions(total_counts,
+                                                                                                       missing_counts)
+
+        # --- MODIFIED: Pass all 5 instruction variables ---
+        process_and_save_file(file_path, labels_to_delete, benign_rows, attack_rows, separate_by_missing, scope)
 
     print("\n" + "=" * 80)
     print("All files have been processed successfully!")
