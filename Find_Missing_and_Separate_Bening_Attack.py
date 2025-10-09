@@ -3,24 +3,12 @@ import pandas as pd
 from collections import defaultdict
 
 # --- 1. Global Configuration ---
-# Use this section to easily configure the script's behavior.
-
-# The folder containing your original, unsorted CSV files.
 INPUT_FOLDER = "Raw_Data_2018"
-
-# The main folder where all cleaned and separated files will be saved.
 OUTPUT_FOLDER = "Cleaned_Separated_Data"
-
-# The number of rows to process at a time (adjust based on your RAM).
 CHUNK_SIZE = 500_000
-
-# A default value that can be suggested to the user.
 DEFAULT_ROWS_PER_FILE = 1_000_000
-
-# The name of the column that contains the labels (e.g., 'Label'). This is case-sensitive!
+# This is now case-insensitive! You can set it to 'label', 'Label', etc.
 LABEL_COLUMN = 'Label'
-
-# The value representing the "normal" or "benign" traffic.
 BENIGN_LABEL_VALUE = 'BENIGN'
 
 
@@ -28,48 +16,56 @@ BENIGN_LABEL_VALUE = 'BENIGN'
 
 def analyze_file(file_path):
     """
-    Reads a CSV file in chunks to analyze its contents. (Pass 1)
+    Reads a CSV file to analyze its contents, now with case-insensitive label detection.
+    Returns counts and the actual, correct name of the label column found.
     """
     print(f"\nAnalyzing file: {os.path.basename(file_path)}...")
     total_counts_by_label = defaultdict(int)
     missing_counts_by_label = defaultdict(int)
 
+    # --- MODIFICATION: Case-insensitive column finding logic ---
+    actual_label_col_name = None
     try:
         header_df = pd.read_csv(file_path, nrows=0, low_memory=False)
-        if LABEL_COLUMN not in header_df.columns:
-            print(f"  ERROR: Label column '{LABEL_COLUMN}' not found. Skipping file.")
-            return None, None
+        for col_name in header_df.columns:
+            if col_name.lower() == LABEL_COLUMN.lower():
+                actual_label_col_name = col_name
+                print(f"  Detected label column as: '{actual_label_col_name}'")
+                break  # Found it, no need to look further
+
+        if actual_label_col_name is None:
+            print(f"  ERROR: A label column like '{LABEL_COLUMN}' not found. Skipping file.")
+            return None, None, None
 
         for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=False):
-            total_counts = chunk[LABEL_COLUMN].value_counts()
+            total_counts = chunk[actual_label_col_name].value_counts()
             for label, count in total_counts.items():
                 total_counts_by_label[label] += count
 
             rows_with_missing = chunk[chunk.isnull().any(axis=1)]
             if not rows_with_missing.empty:
-                missing_counts = rows_with_missing[LABEL_COLUMN].value_counts()
+                missing_counts = rows_with_missing[actual_label_col_name].value_counts()
                 for label, count in missing_counts.items():
                     missing_counts_by_label[label] += count
 
         print("  Analysis complete.")
-        return total_counts_by_label, missing_counts_by_label
+        return total_counts_by_label, missing_counts_by_label, actual_label_col_name
 
     except Exception as e:
         print(f"  ERROR during analysis: {e}. Skipping this file.")
-        return None, None
+        return None, None, None
 
 
 def get_user_instructions(total_counts, missing_counts):
     """
     Shows analysis reports to the user and asks for instructions.
+    (This function is unchanged)
     """
-    # Report 1: Total Row Counts
     print("\n--- Total Row Count Report ---")
     for label, count in sorted(total_counts.items()):
         print(f"  - {label}: {count:,} total rows.")
     print("------------------------------")
 
-    # Prompt 1: Get the row limit for Benign files
     benign_rows_per_file = 0
     if BENIGN_LABEL_VALUE in total_counts:
         while True:
@@ -88,7 +84,6 @@ def get_user_instructions(total_counts, missing_counts):
             except ValueError:
                 print("  Invalid input. Please enter a whole number.")
 
-    # --- ADDED: Get the row limit for Attack files ---
     attack_rows_per_file = 0
     if any(label != BENIGN_LABEL_VALUE for label in total_counts):
         while True:
@@ -107,7 +102,6 @@ def get_user_instructions(total_counts, missing_counts):
             except ValueError:
                 print("  Invalid input. Please enter a whole number.")
 
-    # Prompt 3: Get which labels to clean
     labels_to_delete = set()
     if not missing_counts:
         print("\nThis file has no rows with missing values. No cleaning is needed.")
@@ -126,7 +120,6 @@ def get_user_instructions(total_counts, missing_counts):
         elif user_input.lower() not in ['none', '']:
             labels_to_delete = {label.strip() for label in user_input.split(',')}
 
-    # Prompt 4: Get advanced saving options
     separate_by_missing_status = False
     separation_scope = 'none'
 
@@ -152,8 +145,9 @@ def get_user_instructions(total_counts, missing_counts):
     return labels_to_delete, benign_rows_per_file, attack_rows_per_file, separate_by_missing_status, separation_scope
 
 
-def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, attack_rows_per_file, separate_by_missing,
-                          scope):
+# --- MODIFICATION: Added 'actual_label_col' parameter ---
+def process_and_save_file(file_path, actual_label_col, labels_to_delete, benign_rows_per_file, attack_rows_per_file,
+                          separate_by_missing, scope):
     """
     Reads the CSV again, cleans it, and saves it using the chosen method.
     """
@@ -162,6 +156,7 @@ def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, att
     else:
         print("\nStarting separation process (no cleaning requested).")
 
+    # (Folder creation logic is unchanged)
     if separate_by_missing:
         for status in ["NoMissing", "Missing"]:
             for category in ["Benign", "Attacks"]:
@@ -179,11 +174,13 @@ def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, att
 
             chunk_cleaned = chunk
             if labels_to_delete:
-                rows_to_drop_mask = (chunk[LABEL_COLUMN].isin(labels_to_delete)) & (chunk.isnull().any(axis=1))
+                # --- MODIFICATION: Use the actual, detected column name ---
+                rows_to_drop_mask = (chunk[actual_label_col].isin(labels_to_delete)) & (chunk.isnull().any(axis=1))
                 chunk_cleaned = chunk[~rows_to_drop_mask]
 
-            benign_data = chunk_cleaned[chunk_cleaned[LABEL_COLUMN] == BENIGN_LABEL_VALUE]
-            attack_data = chunk_cleaned[chunk_cleaned[LABEL_COLUMN] != BENIGN_LABEL_VALUE]
+            # --- MODIFICATION: Use the actual, detected column name ---
+            benign_data = chunk_cleaned[chunk_cleaned[actual_label_col] == BENIGN_LABEL_VALUE]
+            attack_data = chunk_cleaned[chunk_cleaned[actual_label_col] != BENIGN_LABEL_VALUE]
 
             if not benign_data.empty:
                 if separate_by_missing and scope in ['benign', 'both']:
@@ -194,36 +191,33 @@ def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, att
 
             if not attack_data.empty:
                 if separate_by_missing and scope in ['attacks', 'both']:
-                    for label, group in attack_data.groupby(LABEL_COLUMN):
+                    # --- MODIFICATION: Use the actual, detected column name ---
+                    for label, group in attack_data.groupby(actual_label_col):
                         buffers[label]['NoMissing'].append(group.dropna())
                         buffers[label]['Missing'].append(group[group.isnull().any(axis=1)])
                 else:
-                    for label, group in attack_data.groupby(LABEL_COLUMN):
+                    # --- MODIFICATION: Use the actual, detected column name ---
+                    for label, group in attack_data.groupby(actual_label_col):
                         buffers[label]['default'].append(group)
 
+            # (Saving logic is unchanged)
             for category, status_buffers in list(buffers.items()):
                 for status, buffer_list in list(status_buffers.items()):
                     is_benign = (category == BENIGN_LABEL_VALUE)
-                    # --- MODIFIED: Use correct variable for row limit ---
                     row_limit = benign_rows_per_file if is_benign else attack_rows_per_file
-
                     if row_limit > 0 and sum(len(df) for df in buffer_list) >= row_limit:
                         df_to_save = pd.concat(buffer_list, ignore_index=True)
                         if df_to_save.empty: continue
-
                         safe_name = "".join(c for c in category if c.isalnum() or c in ('-', '_'))
                         part_num = part_counts[category][status]
-
                         if separate_by_missing:
                             subfolder = "Benign" if is_benign else "Attacks"
                             path = os.path.join(OUTPUT_FOLDER, status, subfolder)
                         else:
                             path = os.path.join(OUTPUT_FOLDER, "Benign" if is_benign else "Attacks")
-
                         filename = os.path.join(path, f"{safe_name}_part_{part_num}.csv")
                         df_to_save.to_csv(filename, index=False)
                         print(f"    Saved {len(df_to_save):,} rows to {os.path.relpath(filename)}")
-
                         buffer_list.clear()
                         part_counts[category][status] += 1
 
@@ -233,17 +227,14 @@ def process_and_save_file(file_path, labels_to_delete, benign_rows_per_file, att
                 if buffer_list:
                     df_to_save = pd.concat(buffer_list, ignore_index=True)
                     if df_to_save.empty: continue
-
                     is_benign = (category == BENIGN_LABEL_VALUE)
                     safe_name = "".join(c for c in category if c.isalnum() or c in ('-', '_'))
                     part_num = part_counts[category][status]
-
                     if separate_by_missing:
                         subfolder = "Benign" if is_benign else "Attacks"
                         path = os.path.join(OUTPUT_FOLDER, status, subfolder)
                     else:
                         path = os.path.join(OUTPUT_FOLDER, "Benign" if is_benign else "Attacks")
-
                     filename = os.path.join(path, f"{safe_name}_part_{part_num}.csv")
                     df_to_save.to_csv(filename, index=False)
                     print(f"    Saved {len(df_to_save):,} rows to {os.path.relpath(filename)}")
@@ -268,15 +259,16 @@ def main():
 
     for file_path in all_csv_files:
         print("=" * 80)
-        total_counts, missing_counts = analyze_file(file_path)
+        # --- MODIFICATION: Get the actual label column name from the analysis ---
+        total_counts, missing_counts, actual_label_col = analyze_file(file_path)
         if total_counts is None: continue
 
-        # --- MODIFIED: Unpack all 5 instruction variables ---
         labels_to_delete, benign_rows, attack_rows, separate_by_missing, scope = get_user_instructions(total_counts,
                                                                                                        missing_counts)
 
-        # --- MODIFIED: Pass all 5 instruction variables ---
-        process_and_save_file(file_path, labels_to_delete, benign_rows, attack_rows, separate_by_missing, scope)
+        # --- MODIFICATION: Pass the actual column name to the processing function ---
+        process_and_save_file(file_path, actual_label_col, labels_to_delete, benign_rows, attack_rows,
+                              separate_by_missing, scope)
 
     print("\n" + "=" * 80)
     print("All files have been processed successfully!")
