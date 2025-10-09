@@ -40,14 +40,10 @@ def calculate_target_strategy(y, ratio):
     target_strategy = {}
     target_minority_count = int(majority_count * ratio)
 
-    # Set target for all classes
     for cls, count in counts.items():
         if cls == majority_class_key:
-            # For now, we are not undersampling the majority class, but you could add that logic here.
-            # Example: target_strategy[cls] = int(count * 0.8)
             target_strategy[cls] = count
         else:
-            # Ensure we only oversample, not undersample minority classes
             target_strategy[cls] = max(count, target_minority_count)
 
     return target_strategy
@@ -56,8 +52,6 @@ def calculate_target_strategy(y, ratio):
 def apply_resampling(X, y, target_strategy, oversampler_class):
     """Apply undersampling and oversampling to reach target counts"""
     current_counts = Counter(y)
-    # Note: With the current strategy, undersample dict will be empty.
-    # This logic is kept for future flexibility if you decide to undersample the majority class.
     undersample = {c: t for c, t in target_strategy.items() if c in current_counts and current_counts[c] > t}
     oversample = {c: t for c, t in target_strategy.items() if c in current_counts and current_counts[c] < t}
 
@@ -71,7 +65,6 @@ def apply_resampling(X, y, target_strategy, oversampler_class):
 
     if oversample:
         print("\nOversampling started...")
-        # Dynamically set k_neighbors for SMOTE-based methods
         min_samples_for_smote = min(count for cls, count in Counter(y_res).items() if cls in oversample)
         k_neighbors = max(1, min(min_samples_for_smote - 1, 5))
 
@@ -120,43 +113,53 @@ def main():
             print("Invalid input. Please enter a number.")
 
     oversamplers = {"1": SMOTE, "2": BorderlineSMOTE, "3": ADASYN}
+    all_samplers = [SMOTE, BorderlineSMOTE, ADASYN]
+
     while True:
         choice = input(
-            "Choose an oversampling method:\n  1: SMOTE (Standard)\n  2: Borderline-SMOTE\n  3: ADASYN\nChoice: ")
-        if choice in oversamplers:
-            oversampler_class = oversamplers[choice]
+            "Choose an oversampling method:\n  1: SMOTE (Standard)\n  2: Borderline-SMOTE\n  3: ADASYN\n  4: All\nChoice: ")
+        if choice in oversamplers or choice == "4":
             break
         else:
-            print("Invalid choice. Please enter 1, 2, or 3.")
+            print("Invalid choice. Please enter 1, 2, 3, or 4.")
 
-    # --- Process each selected file ---
-    for file_path in files_to_process:
-        df = pd.read_csv(file_path)
+    samplers_to_run = all_samplers if choice == "4" else [oversamplers[choice]]
 
-        if 'label' not in df.columns:
-            print(f"\nSkipping '{os.path.basename(file_path)}' (no 'label' column found).")
-            continue
+    # --- Process each selected file with each selected method ---
+    for oversampler_class in samplers_to_run:
+        method_name = oversampler_class.__name__
+        print(f"\n===== PROCESSING WITH: {method_name} =====")
 
-        le = LabelEncoder()
-        y_enc = le.fit_transform(df['label'])
-        display_label_counts(y_enc, le, os.path.basename(file_path))
+        # Create a dedicated output folder for the method
+        method_output_folder = os.path.join(OUTPUT_FOLDER, method_name)
+        os.makedirs(method_output_folder, exist_ok=True)
 
-        target_strategy = calculate_target_strategy(y_enc, ratio)
+        for file_path in files_to_process:
+            df = pd.read_csv(file_path)
 
-        X = df.drop("label", axis=1)
-        X_bal, y_bal = apply_resampling(X, y_enc, target_strategy, oversampler_class)
+            if 'label' not in df.columns:
+                print(f"\nSkipping '{os.path.basename(file_path)}' (no 'label' column found).")
+                continue
 
-        df_bal = pd.DataFrame(X_bal, columns=X.columns)
-        df_bal["label"] = le.inverse_transform(y_bal)
+            le = LabelEncoder()
+            y_enc = le.fit_transform(df['label'])
+            display_label_counts(y_enc, le, os.path.basename(file_path))
 
-        # Display final counts
-        display_label_counts(y_bal, le, f"{os.path.basename(file_path)} (Balanced)")
+            target_strategy = calculate_target_strategy(y_enc, ratio)
 
-        out_file = os.path.join(OUTPUT_FOLDER, os.path.basename(file_path).replace(".csv", "_balanced.csv"))
-        df_bal.to_csv(out_file, index=False)
-        print(f"\nSaved balanced CSV: {os.path.basename(out_file)}")
+            X = df.drop("label", axis=1)
+            X_bal, y_bal = apply_resampling(X, y_enc, target_strategy, oversampler_class)
 
-    print("\nAll selected files processed.")
+            df_bal = pd.DataFrame(X_bal, columns=X.columns)
+            df_bal["label"] = le.inverse_transform(y_bal)
+
+            display_label_counts(y_bal, le, f"{os.path.basename(file_path)} (Balanced)")
+
+            out_file = os.path.join(method_output_folder, os.path.basename(file_path).replace(".csv", "_balanced.csv"))
+            df_bal.to_csv(out_file, index=False)
+            print(f"\nSaved balanced CSV to '{method_name}' folder: {os.path.basename(out_file)}")
+
+    print("\nAll selected files and methods processed.")
 
 
 if __name__ == "__main__":
