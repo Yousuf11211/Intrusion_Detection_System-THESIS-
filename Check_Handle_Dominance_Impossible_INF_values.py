@@ -22,17 +22,19 @@ INF_THRESHOLD = 0.30
 
 
 # ==============================================================================
-# TASK 1: DOMINANCE REPORT LOGIC
+# TASK 1: DOMINANCE REPORT LOGIC (MODIFIED TO PRINT TO TERMINAL)
 # ==============================================================================
+
 def generate_dominance_report(file_path):
     """Analyzes a CSV for value dominance and creates a report."""
     print(f"\nGenerating Dominance Report for: {os.path.basename(file_path)}")
-    # (This function's logic remains unchanged)
     col_counters = defaultdict(Counter)
     total_counts = Counter()
     label_counter = Counter()
     col_value_label_counter = defaultdict(lambda: defaultdict(Counter))
+
     try:
+        # (Analysis phase is unchanged)
         for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, dtype=str, low_memory=False):
             labels = chunk.get("Label") or chunk.get("label")
             if labels is not None:
@@ -45,6 +47,7 @@ def generate_dominance_report(file_path):
                     for v, lbl in zip(chunk[col], labels):
                         if pd.notna(v) and pd.notna(lbl):
                             col_value_label_counter[col][v][lbl] += 1
+
         bucketed = {label: [] for _, _, label in DOMINANCE_RANGES}
         for col, counts in col_counters.items():
             if total_counts[col] == 0: continue
@@ -54,31 +57,60 @@ def generate_dominance_report(file_path):
                 if low <= ratio < high:
                     bucketed[label].append((col, counts, total_counts[col]))
                     break
+
+        # --- MODIFICATION: Report is now printed to terminal AND saved to file ---
         report_path = f"{os.path.splitext(file_path)[0]}_dominance_report.txt"
         with open(report_path, "w", encoding="utf-8") as f:
-            f.write(f"Dominance Report for {os.path.basename(file_path)}\n" + "=" * 60 + "\n\n")
+            header_text = f"Dominance Report for {os.path.basename(file_path)}"
+            f.write(header_text + "\n")
+            f.write("=" * 60 + "\n\n")
+            # No need to print the header to the terminal, it's already clear.
+
             if label_counter:
                 total_labels = sum(label_counter.values())
-                f.write("Global Label Distribution:\n" + "-" * 40 + "\n")
+
+                # Create, write, and print label distribution text
+                label_header = "Global Label Distribution:\n" + "-" * 40
+                f.write(label_header + "\n")
+                print("\n" + label_header)
+
                 for lbl, count in label_counter.most_common():
-                    f.write(f"  {lbl}: {count:,} ({(count / total_labels) * 100:.2f}%)\n")
+                    line_text = f"  {lbl}: {count:,} ({(count / total_labels) * 100:.2f}%)"
+                    f.write(line_text + "\n")
+                    print(line_text)
                 f.write("\n")
+
             for label in bucketed:
-                f.write(f"\nColumns in {label} range:\n" + "-" * 40 + "\n")
+                # Create, write, and print bucket header
+                bucket_header = f"\nColumns in {label} range:\n" + "-" * 40
+                f.write(bucket_header + "\n")
+                print(bucket_header)
+
                 if not bucketed[label]:
                     f.write("  None\n")
+                    print("  None")
                 else:
                     for col, counts, total in bucketed[label]:
-                        f.write(f"\nColumn: {col}\n")
+                        col_header = f"\nColumn: {col}"
+                        f.write(col_header + "\n")
+                        print(col_header)
+
                         for val, count in counts.most_common():
                             ratio = count / total
-                            f.write(f"  Value '{val}': {count:,} ({ratio * 100:.2f}%)")
+
+                            # Build the line first
+                            line_to_output = f"  Value '{val}': {count:,} ({ratio * 100:.2f}%)"
                             if val in col_value_label_counter.get(col, {}):
                                 lbl_counts = col_value_label_counter[col][val]
                                 breakdown = ", ".join(f"{lbl}: {c:,}" for lbl, c in lbl_counts.most_common())
-                                f.write(f" -> Labels: [{breakdown}]")
-                            f.write("\n")
-        print(f"Report saved to {report_path}")
+                                line_to_output += f" -> Labels: [{breakdown}]"
+
+                            # Write and print the complete line
+                            f.write(line_to_output + "\n")
+                            print(line_to_output)
+
+        print(f"\nReport also saved to {report_path}")
+
     except Exception as e:
         print(f"Error during dominance report: {e}")
 
@@ -89,7 +121,6 @@ def generate_dominance_report(file_path):
 def run_data_validation(file_path):
     """Loads a CSV and runs the full validation and cleaning pipeline."""
     print(f"\nValidating and Cleaning: {os.path.basename(file_path)}")
-    # (This function's logic remains unchanged)
     try:
         df = pd.concat([chunk for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE)])
         print(f"Loaded {len(df)} rows.")
@@ -158,7 +189,6 @@ def run_inf_column_removal(file_path):
 
     if not columns_to_delete:
         print("Result: No columns exceeded the 'inf' threshold.")
-        # *** NEW: ASK TO IMPUTE EVEN IF NOTHING WAS REMOVED ***
         if (inf_counts > 0).any():
             if input(
                     "Some 'inf' values were found below the threshold. Handle them with imputation? (y/n): ").lower() == 'y':
@@ -188,7 +218,6 @@ def run_inf_column_removal(file_path):
                 chunk.to_csv(output_csv_path, index=False, mode='a', header=False)
         print(f"Successfully created '{output_filename}'")
 
-        # --- NEW: POST-CLEANING WORKFLOW ---
         print("\n--- Next Steps for the Cleaned File ---")
         print("What would you like to do now?")
         print("  1: Re-analyze the cleaned file for remaining 'inf' values")
@@ -243,7 +272,6 @@ def run_inf_imputation(file_path):
     medians = {}
     try:
         print("Phase 1: Calculating medians for columns with 'inf' values...")
-        # First, find which columns have 'inf' values
         inf_counts = pd.Series(dtype=int)
         for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=False):
             inf_counts = inf_counts.add(chunk.apply(pd.to_numeric, errors='coerce').pipe(np.isinf).sum(), fill_value=0)
@@ -253,7 +281,6 @@ def run_inf_imputation(file_path):
             print("No 'inf' values found to impute.")
             return
 
-        # Now calculate medians for only those columns
         for col in cols_to_process:
             series = pd.read_csv(file_path, usecols=[col], low_memory=False).squeeze("columns")
             median_val = pd.to_numeric(series, errors='coerce').replace([np.inf, -np.inf], np.nan).median()
