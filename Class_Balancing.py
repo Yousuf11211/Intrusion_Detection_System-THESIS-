@@ -3,7 +3,7 @@ import pandas as pd
 from collections import Counter
 from sklearn.preprocessing import LabelEncoder
 from imblearn.under_sampling import RandomUnderSampler
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, BorderlineSMOTE, ADASYN
 
 # ===== CONFIGURATION =====
 INPUT_FOLDER = "Training_2018"
@@ -16,89 +16,71 @@ def get_csv_files(folder):
     return [os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".csv")]
 
 
-def display_label_counts(y, le):
-    """Display label counts"""
+def display_label_counts(y, le, file_name):
+    """Display label counts for a specific file"""
     counts = Counter(y)
     rev_mapping = {i: label for i, label in enumerate(le.classes_)}
-    benign_key = next((k for k, v in rev_mapping.items() if v.lower() == "benign"), None)
-    print("\nLabel distribution:")
-    if benign_key is not None:
-        print(f"  Benign: {counts.get(benign_key, 0):,}")
+
+    print(f"\n--- Label distribution for '{file_name}' ---")
     for k in sorted(counts.keys()):
-        if k != benign_key:
-            print(f"  {rev_mapping[k]}: {counts.get(k, 0):,}")
+        print(f"  {rev_mapping[k]:<20}: {counts.get(k, 0):,}")
     print(f"Total samples: {sum(counts.values()):,}")
+    print("--------------------------------------------------")
 
 
-def get_user_target_counts(y, le):
-    """Ask user for target counts for each label"""
+def calculate_target_strategy(y, ratio):
+    """Automatically calculate the target counts based on a ratio"""
     counts = Counter(y)
-    rev_mapping = {i: label for i, label in enumerate(le.classes_)}
+    if not counts:
+        return {}
+
+    majority_class_key = max(counts, key=counts.get)
+    majority_count = counts[majority_class_key]
+
     target_strategy = {}
-    benign_key = next((k for k, v in rev_mapping.items() if v.lower() == "benign"), None)
+    target_minority_count = int(majority_count * ratio)
 
-    if benign_key is not None:
-        current = counts.get(benign_key, 0)
-        while True:
-            try:
-                target = int(input(f"Benign (current: {current:,}): "))
-                if target > 0:
-                    target_strategy[benign_key] = target
-                    break
-            except ValueError:
-                print("Enter a valid positive number.")
-
-    for k in sorted(counts.keys()):
-        if k != benign_key:
-            current = counts.get(k, 0)
-            while True:
-                try:
-                    target = int(input(f"{rev_mapping[k]} (current: {current:,}): "))
-                    if target > 0:
-                        target_strategy[k] = target
-                        break
-                except ValueError:
-                    print("Enter a valid positive number.")
+    # Set target for all classes
+    for cls, count in counts.items():
+        if cls == majority_class_key:
+            # For now, we are not undersampling the majority class, but you could add that logic here.
+            # Example: target_strategy[cls] = int(count * 0.8)
+            target_strategy[cls] = count
+        else:
+            # Ensure we only oversample, not undersample minority classes
+            target_strategy[cls] = max(count, target_minority_count)
 
     return target_strategy
 
 
-def apply_resampling(X, y, target_strategy):
+def apply_resampling(X, y, target_strategy, oversampler_class):
     """Apply undersampling and oversampling to reach target counts"""
     current_counts = Counter(y)
-    undersample = {c: t for c, t in target_strategy.items() if current_counts[c] > t}
-    oversample = {c: t for c, t in target_strategy.items() if current_counts[c] < t}
+    # Note: With the current strategy, undersample dict will be empty.
+    # This logic is kept for future flexibility if you decide to undersample the majority class.
+    undersample = {c: t for c, t in target_strategy.items() if c in current_counts and current_counts[c] > t}
+    oversample = {c: t for c, t in target_strategy.items() if c in current_counts and current_counts[c] < t}
 
     X_res, y_res = X.copy(), y.copy()
 
     if undersample:
-        print("Undersampling started...")
+        print("\nUndersampling started...")
         rus = RandomUnderSampler(sampling_strategy=undersample, random_state=42)
         X_res, y_res = rus.fit_resample(X_res, y_res)
-        print("Undersampling done. New counts:", dict(sorted(Counter(y_res).items())))
+        print(f"Undersampling done.")
 
     if oversample:
-        print("Oversampling started...")
-        min_class_size = min(Counter(y_res).values())
-        k_neighbors = max(1, min(min_class_size - 1, 5))
-        smote = SMOTE(sampling_strategy=oversample, k_neighbors=k_neighbors, random_state=42)
-        X_res, y_res = smote.fit_resample(X_res, y_res)
-        print("Oversampling done. New counts:", dict(sorted(Counter(y_res).items())))
+        print("\nOversampling started...")
+        # Dynamically set k_neighbors for SMOTE-based methods
+        min_samples_for_smote = min(count for cls, count in Counter(y_res).items() if cls in oversample)
+        k_neighbors = max(1, min(min_samples_for_smote - 1, 5))
 
+        print(f"Using {oversampler_class.__name__} with k_neighbors={k_neighbors}...")
+        sampler = oversampler_class(sampling_strategy=oversample, k_neighbors=k_neighbors, random_state=42)
+        X_res, y_res = sampler.fit_resample(X_res, y_res)
+        print("Oversampling done.")
 
     return X_res, y_res
-
-
-def balance_csv(df, target_strategy):
-    """Balance a single CSV and return balanced DataFrame and LabelEncoder"""
-    X = df.drop("label", axis=1)
-    y = df["label"]
-    le = LabelEncoder()
-    y_enc = le.fit_transform(y)
-    X_bal, y_bal = apply_resampling(X, y_enc, target_strategy)
-    df_bal = pd.DataFrame(X_bal, columns=X.columns)
-    df_bal["label"] = le.inverse_transform(y_bal)
-    return df_bal, le
 
 
 # ===== MAIN SCRIPT =====
@@ -123,46 +105,58 @@ def main():
             print(f"  ✗ Skipped")
 
     if not files_to_process:
-        print("No files selected for processing!")
+        print("\nNo files selected for processing!")
         return
 
-    # --- Similar files question ---
-    similar_flag = input("Are all files similar (same rows, different columns)? (y/n): ").lower()
+    # --- Get user settings for balancing ---
+    while True:
+        try:
+            ratio = float(input("\nEnter the desired minority-to-majority ratio (e.g., 0.5 for 50%): "))
+            if 0 < ratio <= 1:
+                break
+            else:
+                print("Please enter a number between 0 and 1.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
 
-    if similar_flag == "y":
-        # Use the CSV with most columns as base
-        base_file = max(files_to_process, key=lambda f: pd.read_csv(f, nrows=1).shape[1])
-        df_base = pd.read_csv(base_file)
-        le_base = LabelEncoder()
-        y_base = le_base.fit_transform(df_base["label"])
-        display_label_counts(y_base, le_base)
-        target_strategy = get_user_target_counts(y_base, le_base)
-        df_bal, le_bal = balance_csv(df_base, target_strategy)
-        print(f"Balanced base CSV: {os.path.basename(base_file)} -> shape {df_bal.shape}")
+    oversamplers = {"1": SMOTE, "2": BorderlineSMOTE, "3": ADASYN}
+    while True:
+        choice = input(
+            "Choose an oversampling method:\n  1: SMOTE (Standard)\n  2: Borderline-SMOTE\n  3: ADASYN\nChoice: ")
+        if choice in oversamplers:
+            oversampler_class = oversamplers[choice]
+            break
+        else:
+            print("Invalid choice. Please enter 1, 2, or 3.")
 
-        # Apply column matching and save each file
-        for f in files_to_process:
-            df_current = pd.read_csv(f)
-            cols_out = [c for c in df_current.columns if c in df_bal.columns]
-            df_out = df_bal[cols_out + ["label"]]
-            out_file = os.path.join(OUTPUT_FOLDER, os.path.basename(f).replace(".csv", "_balanced.csv"))
-            df_out.to_csv(out_file, index=False)
-            print(f"Saved balanced CSV: {os.path.basename(out_file)}")
+    # --- Process each selected file ---
+    for file_path in files_to_process:
+        df = pd.read_csv(file_path)
 
-    else:
-        # Balance each file independently
-        for f in files_to_process:
-            df = pd.read_csv(f)
-            le_file = LabelEncoder()
-            y_file = le_file.fit_transform(df["label"])
-            display_label_counts(y_file, le_file)
-            target_strategy = get_user_target_counts(y_file, le_file)
-            df_bal, _ = balance_csv(df, target_strategy)
-            out_file = os.path.join(OUTPUT_FOLDER, os.path.basename(f).replace(".csv", "_balanced.csv"))
-            df_bal.to_csv(out_file, index=False)
-            print(f"Saved balanced CSV: {os.path.basename(out_file)}")
+        if 'label' not in df.columns:
+            print(f"\nSkipping '{os.path.basename(file_path)}' (no 'label' column found).")
+            continue
 
-    print("\nAll files processed.")
+        le = LabelEncoder()
+        y_enc = le.fit_transform(df['label'])
+        display_label_counts(y_enc, le, os.path.basename(file_path))
+
+        target_strategy = calculate_target_strategy(y_enc, ratio)
+
+        X = df.drop("label", axis=1)
+        X_bal, y_bal = apply_resampling(X, y_enc, target_strategy, oversampler_class)
+
+        df_bal = pd.DataFrame(X_bal, columns=X.columns)
+        df_bal["label"] = le.inverse_transform(y_bal)
+
+        # Display final counts
+        display_label_counts(y_bal, le, f"{os.path.basename(file_path)} (Balanced)")
+
+        out_file = os.path.join(OUTPUT_FOLDER, os.path.basename(file_path).replace(".csv", "_balanced.csv"))
+        df_bal.to_csv(out_file, index=False)
+        print(f"\nSaved balanced CSV: {os.path.basename(out_file)}")
+
+    print("\nAll selected files processed.")
 
 
 if __name__ == "__main__":
