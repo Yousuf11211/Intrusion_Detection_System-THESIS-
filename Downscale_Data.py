@@ -1,18 +1,22 @@
+#This script is used to downscale the data
+#Generate 2 new csv files (bening and attacks)
+#show count for each label in each file
+#The output csv files are saved in the output folder
+#Data is used for testing the models
+
+
+
+
 import os
 import pandas as pd
 
-# ==============================================================================
-# --- 1. Global Configuration ---
-# All user-adjustable settings are here for easy access.
-# ==============================================================================
-
-# The folder where your original, separated CSV files are located.
+#Input folder with all csv files
 INPUT_FOLDER = "2018_Separated_Nomissing"
 
-# The folder where the final 'benign.csv' and 'attacks.csv' will be saved.
+#output folder to save the new csv files
 OUTPUT_FOLDER = "Downscale_Csv_2018"
 
-# The percentage of benign data to keep (0.1 means 10%).
+#combine 10% of the bening data from each file
 BENIGN_SAMPLING_FRACTION = 0.1
 
 # A fixed number to ensure that the "random" shuffle is the same every time you
