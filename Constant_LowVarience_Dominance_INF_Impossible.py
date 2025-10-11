@@ -4,11 +4,8 @@ import numpy as np
 from collections import Counter, defaultdict
 
 # --- 1. GLOBAL CONFIGURATION ---
-# The folder where your original CSV files are located.
 INPUT_FOLDER = "Downscale_Csv_2018"
-# A general folder for saving cleaned/modified files from various tasks.
 OUTPUT_FOLDER = "Cleaned_Files_2018"
-# The number of rows for pandas to process at a time (for memory efficiency).
 CHUNK_SIZE = 1_000_000
 
 # --- Task 1 Config ---
@@ -47,13 +44,11 @@ def get_user_yes_no(prompt):
 
 
 # ==============================================================================
-# TASK 1: DOMINANCE REPORT LOGIC
-# (No changes needed to this function)
+# TASK 1: STATIC DOMINANCE REPORT LOGIC
 # ==============================================================================
 def generate_dominance_report(file_path):
-    """Analyzes a CSV for value dominance and creates a report."""
+    """Analyzes a CSV for value dominance and creates a static report file."""
     print(f"\n--- [Task 1] Generating Dominance Report for: {os.path.basename(file_path)} ---")
-    # ... (function code is identical to your provided script)
     col_counters = defaultdict(Counter)
     total_counts = Counter()
     label_counter = Counter()
@@ -121,67 +116,71 @@ def generate_dominance_report(file_path):
     except Exception as e:
         print(f"ERROR during dominance report: {e}")
 
-
 # ==============================================================================
 # TASK 2: DATA VALIDATION & CLEANING LOGIC (ROW REMOVAL)
-# (No changes needed to this function)
 # ==============================================================================
 def run_data_validation(file_path):
     """Loads a CSV and runs the full validation and cleaning pipeline."""
     print(f"\n--- [Task 2] Validating and Cleaning: {os.path.basename(file_path)} ---")
-    # ... (function code is identical to your provided script)
     try:
+        # Load the entire file into memory for this task
         df = pd.concat([chunk for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE)])
-        print(f"Loaded {len(df)} rows.")
-        results = {'negative_issues': {}, 'port_issues': {}, 'percentage_issues': {}}
+        print(f"Loaded {len(df):,} rows.")
+        results = {'negative_issues': {}, 'port_issues': {}}
+
+        # Standardize label column name
         if 'Label' in df.columns and 'label' not in df.columns:
             df = df.rename(columns={'Label': 'label'})
         if 'label' not in df.columns:
-            print("Warning: 'label' column not found.")
+            print("Warning: 'label' column not found. Creating a placeholder.")
             df['label'] = 'Unknown'
+
+        # Check for negative values in specific columns
         for col in df.columns:
-            if any(kw in col.lower() for kw in CAN_BE_NEGATIVE_KEYWORDS): continue
+            if any(kw in col.lower() for kw in CAN_BE_NEGATIVE_KEYWORDS):
+                continue
             if any(kw in col.lower() for kw in NEVER_NEGATIVE_KEYWORDS):
                 numeric_col = pd.to_numeric(df[col], errors='coerce')
-                if (numeric_col < 0).sum() > 0:
+                if (numeric_col < 0).any():
                     mask = numeric_col < 0
-                    results['negative_issues'][col] = {'count': mask.sum(), 'rows': list(df[mask].index),
-                                                       'labels': df.loc[mask, 'label'].value_counts().to_dict()}
+                    results['negative_issues'][col] = {'count': mask.sum(), 'rows': list(df[mask].index)}
+
+        # Check for invalid port numbers
         for col in PORT_COLUMNS:
             if col in df.columns:
                 numeric_col = pd.to_numeric(df[col], errors='coerce')
-                if (~numeric_col.between(0, 65535)).sum() > 0:
+                if (~numeric_col.between(0, 65535)).any():
                     mask = ~numeric_col.between(0, 65535)
-                    results['port_issues'][col] = {'count': mask.sum(), 'rows': list(df[mask].index),
-                                                   'labels': df.loc[mask, 'label'].value_counts().to_dict()}
+                    results['port_issues'][col] = {'count': mask.sum(), 'rows': list(df[mask].index)}
+
+        # Aggregate all invalid row indices
         invalid_indices = set()
         for group in results.values():
             for info in group.values():
                 invalid_indices.update(info['rows'])
+
         if not invalid_indices:
-            print("\nNo invalid rows to clean.")
+            print("\n[RESULT] No invalid rows found based on the rules.")
             return
-        print(f"\nFound {len(invalid_indices)} unique rows with invalid values.")
-        if get_user_yes_no("Remove invalid rows and save new file?"):
+
+        print(f"\n[RESULT] Found {len(invalid_indices):,} unique rows with invalid values.")
+        if get_user_yes_no("Do you want to remove these invalid rows and save a new file?"):
             df_clean = df.drop(index=list(invalid_indices)).copy()
             clean_filename = f"{os.path.splitext(os.path.basename(file_path))[0]}_validated.csv"
             output_path = os.path.join(OUTPUT_FOLDER, clean_filename)
             df_clean.to_csv(output_path, index=False)
-            print(f"Saved clean data to: {output_path}")
+            print(f"  Successfully saved clean data ({len(df_clean):,} rows) to: {output_path}")
         else:
-            print("Skipping data cleaning.")
+            print("  Skipping data cleaning.")
     except Exception as e:
         print(f"ERROR during data validation: {e}")
 
-
 # ==============================================================================
 # TASK 3: 'INF' COLUMN REMOVAL & IMPUTATION LOGIC
-# (No changes needed to these functions)
 # ==============================================================================
 def run_inf_column_removal(file_path):
     """Analyzes and removes columns with a high percentage of 'inf' values."""
     print(f"\n--- [Task 3] Processing for 'inf' columns: {os.path.basename(file_path)} ---")
-    # ... (function code is identical to your provided script)
     print(f"Phase 1: Analyzing columns (Threshold: {INF_THRESHOLD:.0%})...")
     inf_counts = pd.Series(dtype=int)
     total_rows = 0
@@ -197,18 +196,22 @@ def run_inf_column_removal(file_path):
     except Exception as e:
         print(f"ERROR during analysis: {e}")
         return
+
     if not columns_to_delete:
-        print("Result: No columns exceeded the 'inf' threshold.")
+        print("\n[RESULT] No columns exceeded the 'inf' threshold.")
         if (inf_counts > 0).any():
-            if get_user_yes_no("Some 'inf' values were found below the threshold. Handle them with imputation?"):
+            if get_user_yes_no("  Some 'inf' values were found below the threshold. Handle them with imputation?"):
                 run_inf_imputation(file_path)
         return
-    print(f"\nFound {len(columns_to_delete)} columns to remove:")
+
+    print(f"\n[RESULT] Found {len(columns_to_delete)} columns to remove:")
     for col in columns_to_delete:
         print(f"  - '{col}' ({inf_percentages[col]:.2%} inf)")
-    if not get_user_yes_no("Permanently delete these columns?"):
+
+    if not get_user_yes_no("\nDo you want to permanently delete these columns?"):
         print("Operation cancelled.")
         return
+
     print("\nPhase 2: Deleting columns and creating new file...")
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     output_filename = f"{base_name}_inf_cleaned.csv"
@@ -222,11 +225,11 @@ def run_inf_column_removal(file_path):
                 is_first_chunk = False
             else:
                 chunk.to_csv(output_csv_path, index=False, mode='a', header=False)
-        print(f"Successfully created '{output_filename}'")
+        print(f"  Successfully created '{output_filename}'")
         print("\n--- Next Steps for the Cleaned File ---")
         print("  1: Re-analyze the cleaned file for remaining 'inf' values")
         print("  2: Handle remaining 'inf' values with median imputation")
-        print("  3: Do nothing / Continue to next file")
+        print("  3: Do nothing / Continue")
         choice = input("Enter your choice (1, 2, or 3): ")
         if choice == '1':
             report_remaining_inf(output_csv_path)
@@ -237,11 +240,9 @@ def run_inf_column_removal(file_path):
     except Exception as e:
         print(f"ERROR during file creation: {e}")
 
-
 def report_remaining_inf(file_path):
     """A simple analysis pass to report, but not act on, 'inf' values."""
     print(f"\n--- Re-analyzing for remaining 'inf' in {os.path.basename(file_path)} ---")
-    # ... (function code is identical to your provided script)
     inf_counts = pd.Series(dtype=int)
     total_rows = 0
     try:
@@ -252,19 +253,17 @@ def report_remaining_inf(file_path):
         inf_percentages = inf_counts / total_rows
         remaining_inf_cols = inf_percentages[inf_percentages > 0].index.tolist()
         if not remaining_inf_cols:
-            print("No remaining 'inf' values found.")
+            print("[RESULT] No remaining 'inf' values found.")
         else:
-            print("Found remaining 'inf' values in the following columns:")
+            print("[RESULT] Found remaining 'inf' values in the following columns:")
             for col in remaining_inf_cols:
                 print(f"  - '{col}': {inf_counts[col]} values ({inf_percentages[col]:.4f}%)")
     except Exception as e:
         print(f"ERROR during re-analysis: {e}")
 
-
 def run_inf_imputation(file_path):
     """Finds all 'inf' values and replaces them with the column median."""
     print(f"\n--- Imputing 'inf' values in {os.path.basename(file_path)} ---")
-    # ... (function code is identical to your provided script)
     medians = {}
     try:
         print("Phase 1: Calculating medians for columns with 'inf' values...")
@@ -294,18 +293,16 @@ def run_inf_imputation(file_path):
                 is_first_chunk = False
             else:
                 chunk.to_csv(output_csv_path, index=False, mode='a', header=False)
-        print(f"Successfully created '{output_filename}'")
+        print(f"  Successfully created '{output_filename}'")
     except Exception as e:
         print(f"ERROR during imputation: {e}")
 
-
 # ==============================================================================
-# TASK 4: REMOVE CONSTANT OR LOW-VARIANCE COLUMNS (FROM YOUR FIRST SCRIPT)
+# TASK 4: REMOVE CONSTANT OR LOW-VARIANCE COLUMNS
 # ==============================================================================
-def run_variance_analysis(file_path, output_path):
+def run_variance_analysis(file_path):
     """
     Analyzes a CSV for constant/low-variance columns and optionally removes them.
-    This function is adapted from your first script.
     """
     print(f"\n--- [Task 4] Analyzing for Low-Variance Columns: {os.path.basename(file_path)} ---")
     try:
@@ -354,6 +351,8 @@ def run_variance_analysis(file_path, output_path):
         print("\nColumns identified for removal:", final_drop_list)
 
         if get_user_yes_no("Do you want to remove these columns and save a new, cleaned file?"):
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            output_path = os.path.join(OUTPUT_FOLDER, f"{base_name}_variance_cleaned.csv")
             print(f"  Removing {len(final_drop_list)} columns and saving new file...")
             chunk_iterator = pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=False)
             first_chunk = next(chunk_iterator)
@@ -366,9 +365,106 @@ def run_variance_analysis(file_path, output_path):
             print("  Skipping file modification as requested.")
 
     except Exception as e:
-        print(f"ERROR: An unexpected error occurred while processing {os.path.basename(file_path)}.")
-        print(f"DETAILS: {e}")
+        print(f"ERROR: An unexpected error occurred: {e}")
 
+# ==============================================================================
+# TASK 5: INTERACTIVE DOMINANCE & VARIANCE ANALYSIS (NEW)
+# ==============================================================================
+def run_interactive_dominance_analysis(file_path):
+    """
+    Interactively finds columns with a user-defined dominance percentage,
+    then allows for a follow-up low-variance check and optional deletion.
+    """
+    print(f"\n--- [Task 5] Interactive Dominance Analysis: {os.path.basename(file_path)} ---")
+    try:
+        # Step 1: Perform a full analysis of the file once
+        print("  Analyzing file to gather column statistics... (this may take a moment)")
+        col_counters = defaultdict(Counter)
+        total_counts = Counter()
+        for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, dtype=str, low_memory=False):
+            for col in chunk.columns:
+                values = chunk[col].dropna()
+                col_counters[col].update(values)
+                total_counts[col] += len(values)
+        print("  Analysis complete.")
+
+        # Step 2: Enter the interactive loop for this file
+        while True:
+            print("\n--- Dominance Range Selection ---")
+            try:
+                min_perc = float(input("  Enter the MINIMUM dominance percentage (e.g., 90): "))
+                max_perc = float(input("  Enter the MAXIMUM dominance percentage (e.g., 100): "))
+                if not (0 <= min_perc <= 100 and 0 <= max_perc <= 100 and min_perc <= max_perc):
+                    print("  Error: Please enter valid percentages between 0 and 100.")
+                    continue
+            except ValueError:
+                print("  Error: Invalid input. Please enter numbers.")
+                continue
+
+            # Step 3: Find and display columns within the user-defined range
+            columns_in_range = {}
+            for col, counts in col_counters.items():
+                if total_counts[col] == 0: continue
+                most_common_val, most_common_count = counts.most_common(1)[0]
+                ratio = most_common_count / total_counts[col]
+
+                if (min_perc / 100) <= ratio <= (max_perc / 100):
+                    columns_in_range[col] = (most_common_val, ratio)
+
+            if not columns_in_range:
+                print(f"\n[RESULT] No columns found with a dominance between {min_perc}% and {max_perc}%.")
+                if not get_user_yes_no("Do you want to try a different percentage range for this file?"):
+                    break  # Exit loop for this file
+                else:
+                    continue  # Restart loop for this file
+
+            print(f"\n[RESULT] Found {len(columns_in_range)} columns with dominance between {min_perc}% and {max_perc}%:")
+            for col, (val, ratio) in columns_in_range.items():
+                print(f"  - Column '{col}': Value '{val}' dominates with {ratio:.2%}")
+
+            # Step 4: Ask for follow-up low-variance analysis
+            if get_user_yes_no("\nDo you want to see the unique value counts for these specific columns?"):
+                print("\n--- Low-Variance Detail ---")
+                for col in columns_in_range.keys():
+                    unique_count = len(col_counters[col])
+                    print(f"  - Column '{col}' has {unique_count} unique value(s).")
+
+            # Step 5: Ask for the final action
+            print("\n--- Action Menu ---")
+            action = input("Enter 'd' to delete these columns, 'r' to re-analyze, or 'n' for the next file: ").lower().strip()
+
+            if action == 'd':
+                cols_to_delete = list(columns_in_range.keys())
+                print(f"\nPreparing to delete {len(cols_to_delete)} columns...")
+                if get_user_yes_no("Are you sure you want to permanently remove these columns?"):
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    output_filename = f"{base_name}_interactive_cleaned.csv"
+                    output_path = os.path.join(OUTPUT_FOLDER, output_filename)
+
+                    print(f"  Deleting columns and saving to {output_path}...")
+                    is_first_chunk = True
+                    for chunk in pd.read_csv(file_path, chunksize=CHUNK_SIZE, low_memory=False):
+                        chunk.drop(columns=cols_to_delete, inplace=True, errors='ignore')
+                        if is_first_chunk:
+                            chunk.to_csv(output_path, index=False, mode='w')
+                            is_first_chunk = False
+                        else:
+                            chunk.to_csv(output_path, index=False, mode='a', header=False)
+                    print("  Deletion successful.")
+                else:
+                    print("  Deletion cancelled.")
+                break  # Deletion is a final action, so we exit the loop for this file
+
+            elif action == 'r':
+                print("\nRestarting analysis for this file...")
+                continue  # Go to the top of the while loop
+
+            else:  # 'n' or any other key
+                print("  Moving to the next file.")
+                break  # Exit the while loop for this file
+
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred: {e}")
 
 # ==============================================================================
 # MAIN DRIVER: INTEGRATES TASK AND FILE SELECTION
@@ -380,17 +476,18 @@ def main():
 
     # --- Task Selection ---
     print("\nPlease choose a task to perform on the files:")
-    print("  1: Generate Dominance Report (prints to screen and saves .txt report)")
-    print("  2: Validate Data and Remove Invalid Rows (e.g., negative duration, bad ports)")
-    print("  3: Remove Columns with High Percentage of 'inf' Values (with imputation option)")
-    print("  4: Remove Constant or Low-Variance Columns (your original script's feature)")
+    print("  1: Generate Static Dominance Report (.txt file)")
+    print("  2: Validate Data and Remove Invalid Rows")
+    print("  3: Handle Columns with High 'inf' Values")
+    print("  4: Remove Constant or Low-Variance Columns")
+    print("  5: Interactive Dominance & Variance Analysis (NEW!)")
 
-    task_choice = input("Enter your choice (1, 2, 3, or 4): ").strip()
-    if task_choice not in ['1', '2', '3', '4']:
+    task_choice = input("Enter your choice (1, 2, 3, 4, or 5): ").strip()
+    if task_choice not in ['1', '2', '3', '4', '5']:
         print("Invalid choice. Exiting.")
         return
 
-    # --- File Discovery and Selection (from your first script) ---
+    # --- File Discovery and Selection ---
     if not os.path.isdir(INPUT_FOLDER):
         print(f"Error: Input folder not found at '{INPUT_FOLDER}'")
         return
@@ -437,10 +534,9 @@ def main():
         elif task_choice == '3':
             run_inf_column_removal(file_path)
         elif task_choice == '4':
-            # Construct a unique output path for this task
-            base_name = os.path.splitext(os.path.basename(file_path))[0]
-            output_file_path = os.path.join(OUTPUT_FOLDER, f"{base_name}_variance_cleaned.csv")
-            run_variance_analysis(file_path, output_file_path)
+            run_variance_analysis(file_path)
+        elif task_choice == '5':
+            run_interactive_dominance_analysis(file_path)
         print("-" * 70)
 
     print("\nAll selected files have been processed.")
